@@ -75,17 +75,7 @@ The embedded web server runs asynchronously on port **8088** protected by **HTTP
 | `/resetConfig`| `GET` | Factory resets flash settings to embedded defaults and restarts. |
 | `/doUpdate` | `POST` | Handles Over-The-Air (OTA) binary firmware update uploads. |
 
----
 
-## Hardware Pinout & Configuration
-
-- **Target Board**: ESP32-S3 DevKit (`esp32-s3-devkitc-1`)
-- **Sensor Input Pin (`IN_1`)**: GPIO 47
-- **Default Static IP**: `192.168.3.249`
-- **Default Gateway**: `192.168.1.1`
-- **Subnet Mask**: `255.255.252.0`
-
----
 
 ## Building and Flashing
 
