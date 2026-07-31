@@ -1,0 +1,19 @@
+# PlatformIO build output & temporary files
+.pio/
+.pioenvs/
+.piolibdeps/
+
+# VS Code IDE files
+.vscode/
+*.swp
+*.tmp
+
+# Configuration files containing sensitive credentials
+config_manager.cpp
+config_manager.h
+config_manager.*
+config.manager
+
+# System and OS files
+.DS_Store
+Thumbs.db
