@@ -1,8 +1,10 @@
-#include "log_task.h"
-#include "web_server.h"
+#include "core/log_task.h"
+#include "core/web_server_task.h"
+#include "core/core_engine.h"
 #include <Arduino.h>
 #include <unordered_map>
 
+#define SERIAL_BAUDRATE    9600 
 /* -------------------------------------------------------------------------- */
 /*                            STRUCTS & HASH HELPERS                          */
 /* -------------------------------------------------------------------------- */
@@ -24,8 +26,6 @@ struct StringHash {
 /* -------------------------------------------------------------------------- */
 
 static LogLevel currentLogLevel = LOG_LEVEL_DEBUG;
-static bool serial_ready = false;
-static bool web_ready = false;
 
 // Local Module Log Mutex Handle
 static SemaphoreHandle_t logMutex = NULL;
@@ -58,6 +58,7 @@ static String levelToStr(LogLevel level) {
 /**
  * @brief Parses raw command strings into command name and argument, then executes matching registered handler.
  * @param raw_cmd The raw command string received (e.g., "SET_LOG_LEVEL: DEBUG").
+ * @return None
  */
 static void execute_cmd(const String &raw_cmd) {
     LOG_DEBUG("Raw command received: " + raw_cmd);
@@ -102,6 +103,7 @@ static void execute_cmd(const String &raw_cmd) {
 /**
  * @brief Command handler: Lists all acceptable parameters for setting log level.
  * @param arg Command argument (unused).
+ * @return None
  */
 void listLogLevel(const String &arg) {
     LOG_INFO("Acceptable setLogLevel parameters:");
@@ -114,6 +116,7 @@ void listLogLevel(const String &arg) {
 /**
  * @brief Command handler: Sets the system current log severity level.
  * @param arg Parameter string representing desired log level (e.g. "DEBUG", "1", "LOG_LEVEL_INFO").
+ * @return None
  */
 void setLogLevel(const String &arg) {
     String cleanArg = arg;
@@ -143,10 +146,12 @@ void setLogLevel(const String &arg) {
 /**
  * @brief Command handler: Prints the current log severity level string.
  * @param arg Command argument (unused).
+ * @return None
  */
 void getLogLevel(const String &arg) {
     LOG_INFO("Current Log Level: " + String(levelToStr(currentLogLevel)));
 }
+
 
 /* -------------------------------------------------------------------------- */
 /*                            GLOBAL API FUNCTIONS                            */
@@ -160,6 +165,11 @@ void getLogLevel(const String &arg) {
 void logPrint(const String &msg, LogLevel level) {
     if (level < currentLogLevel) 
         return;
+
+    bool serial_ready = (CoreState_GetMode() >= MODE_NORMAL);
+    WebServerState_t webState = CoreState_GetWebServer();
+    bool web_ready = (webState == WEB_STATE_LISTENING || webState == WEB_STATE_CLIENT_CONNECTED);
+
     if (logMutex != NULL && xSemaphoreTake(logMutex, portMAX_DELAY) == true) {
         switch (level) {
             case LOG_LEVEL_DEBUG:
@@ -207,7 +217,6 @@ void initLogTask() {
     if (commandQueue == NULL) {
         commandQueue = xQueueCreate(10, sizeof(CommandPacket));
     }
-
     Serial.begin(SERIAL_BAUDRATE);
     Serial.onReceive([]() {
         static String serialBuf = "";
@@ -227,13 +236,11 @@ void initLogTask() {
 
     setSerialLogReady();
     LOG_INFO("Init log task done"); 
-    String set_log_cmd = "SET_LOG_LEVEL";
-    String get_log_cmd = "GET_LOG_LEVEL";
-    String list_log_cmd = "LIST_LOG_LEVEL";
-    register_cmd(set_log_cmd, setLogLevel);
-    register_cmd(get_log_cmd, getLogLevel);
-    register_cmd(list_log_cmd, listLogLevel);
+    register_cmd(CMD_SET_LOG_LEVEL, setLogLevel);
+    register_cmd(CMD_GET_LOG_LEVEL, getLogLevel);
+    register_cmd(CMD_LIST_LOG_LEVEL, listLogLevel);
 }
+
 
 /**
  * @brief Registers a command string and its handler function into the command map.
@@ -256,17 +263,17 @@ bool register_cmd(const String &name, CommandHandlerFunc handler) {
 }
 
 /**
- * @brief Enables Serial log output flag.
+ * @brief Updates system mode to normal to enable Serial log output.
  */
 void setSerialLogReady() {
-    serial_ready = true;
+    CoreState_SetMode(MODE_NORMAL);
 }
 
 /**
- * @brief Enables Web WebSocket log output flag.
+ * @brief Updates WebServer state to listening to enable Web WebSocket log output.
  */
 void setWebLogReady() {
-    web_ready = true;
+    CoreState_SetWebServer(WEB_STATE_LISTENING);
 }
 
 /**
@@ -292,7 +299,11 @@ void postIncomingCommand(const String &cmdText, CommandSource source) {
  * @brief FreeRTOS Task function body (Event-driven execution loop for log task).
  */
 void vLogTask(void *pvParameters) {
+    /* Wait until core engine is done */
+    waiting_on_event(SYSTEM_EVENT, MODE_SETUP, portMAX_DELAY);
     CommandPacket packet;
+    initLogTask();
+    CoreState_SetMode(MODE_NORMAL);
     LOG_INFO("vLogTask started, sleeping until command arrives...");
 
     for (;;) {

@@ -6,7 +6,6 @@
 /* -------------------------------------------------------------------------- */
 /*                                  CONSTANTS                                 */
 /* -------------------------------------------------------------------------- */
-#define SERIAL_BAUDRATE    9600 
 
 /* ANSI Color Codes for Terminal/Serial */
 #define LOG_COLOR_RESET   "\033[0m"
@@ -74,11 +73,15 @@ struct CommandPacket {
 
 /**
  * @brief Initializes the logging system, Serial interface, and default commands.
+ * @param None
+ * @return None
  */
 void initLogTask();
 
 /**
  * @brief FreeRTOS Task function for log and command processing.
+ * @param pvParameters Pointer to FreeRTOS task parameters.
+ * @return None
  */
 void vLogTask(void *pvParameters);
 
@@ -86,6 +89,7 @@ void vLogTask(void *pvParameters);
  * @brief Thread-safe logging function that outputs messages to Serial and Web sockets.
  * @param msg The message string to log.
  * @param level Log severity level (default: LOG_LEVEL_INFO).
+ * @return None
  */
 void logPrint(const String &msg, LogLevel level = LOG_LEVEL_INFO);
 
@@ -99,11 +103,15 @@ bool register_cmd(const String &name, CommandHandlerFunc handler);
 
 /**
  * @brief Enables Serial log output.
+ * @param None
+ * @return None
  */
 void setSerialLogReady();
 
 /**
  * @brief Enables Web WebSocket log output.
+ * @param None
+ * @return None
  */
 void setWebLogReady();
 
@@ -111,7 +119,17 @@ void setWebLogReady();
  * @brief Thread-safe function to post incoming command from Serial or Web to vLogTask queue.
  * @param cmdText Command text string.
  * @param source Origin source (CMD_SOURCE_SERIAL or CMD_SOURCE_WEB).
+ * @return None
  */
 void postIncomingCommand(const String &cmdText, CommandSource source);
 
+/* -------------------------------------------------------------------------- */
+/*                               STRING CONSTANTS                             */
+/* -------------------------------------------------------------------------- */
+#define CMD_SET_LOG_LEVEL   "SET_LOG_LEVEL"
+#define CMD_GET_LOG_LEVEL   "GET_LOG_LEVEL"
+#define CMD_LIST_LOG_LEVEL  "LIST_LOG_LEVEL"
+
 #endif // LOG_TASK_H
+
+

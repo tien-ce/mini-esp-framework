@@ -1,0 +1,236 @@
+#include "core/core_engine.h"
+
+// Internal Bit Offset Map (4 bits per domain)
+#define OFFSET_MODE      0
+#define OFFSET_NETWORK   4
+#define OFFSET_WEB       8
+#define OFFSET_MQTT      12
+#define MASK_DOMAIN_4BIT 0x0F
+
+static CoreSystemStateMatrix_t  g_state_matrix;
+static SemaphoreHandle_t        g_state_mutex = NULL;
+static EventGroupHandle_t       g_state_event_group = NULL;
+
+/**
+ * @brief Gets bit offset in event group corresponding to domain event type.
+ * @param type Event domain category identifier.
+ * @return Bit offset value (0, 4, 8, 12) or 0xFF if invalid.
+ */
+static uint8_t GetDomainOffset(Event_t type) {
+    switch (type) {
+        case SYSTEM_EVENT:  return OFFSET_MODE;
+        case NETWORK_EVENT: return OFFSET_NETWORK;
+        case WEB_EVENT:     return OFFSET_WEB;
+        case MQTT_EVENT:    return OFFSET_MQTT;
+        default:            return 0xFF; // Invalid
+    }
+}
+
+/**
+ * @brief Clears and sets event group domain bits atomically to signal state changes.
+ * @param type Domain event category identifier.
+ * @param new_state New state value enum cast to uint8_t.
+ * @return None
+ */
+static void UpdateDomainBits(Event_t type, uint8_t new_state) {
+    uint8_t offset = GetDomainOffset(type);
+    if (offset == 0xFF) return;
+
+    // 1. Clear all 4 bits allocated for this domain
+    xEventGroupClearBits(g_state_event_group, (MASK_DOMAIN_4BIT << offset));
+
+    // 2. Set bit corresponding to new_state
+    xEventGroupSetBits(g_state_event_group, (1 << (offset + new_state)));
+}
+
+/**
+ * @brief Initializes FreeRTOS synchronization primitives (mutex and event group) for state matrix.
+ * @param None
+ * @return true on success, false if memory allocation failed.
+ */
+static bool CoreState_Init(void) {
+    // 1. Allocate FreeRTOS synchronization primitives
+    g_state_mutex = xSemaphoreCreateMutex();
+    g_state_event_group = xEventGroupCreate();
+
+    if (g_state_mutex == NULL || g_state_event_group == NULL)
+        return false;
+    // 2. Set initial memory state
+    g_state_matrix.mode = MODE_BOOT;
+    g_state_matrix.network = NET_STATE_DISCONNECTED;
+    g_state_matrix.web = WEB_STATE_STOPPED;
+    g_state_matrix.mqtt = MQTT_STATE_DISCONNECTED;
+    g_state_matrix.storage_ok = false;
+    g_state_matrix.last_update = xTaskGetTickCount();
+    // 3. Immediately broadcast MODE_BOOT state into Event Group
+    CoreState_SetMode(MODE_BOOT);
+    return true;
+}
+
+
+/* Public */
+bool waiting_on_event(Event_t type, uint8_t expected_state, TickType_t timeout_ticks) {
+    if (g_state_event_group == NULL) return false;
+
+    uint8_t offset = GetDomainOffset(type);
+    if (offset == 0xFF || expected_state > 15) return false;
+
+    // Calculate exact target bit position
+    EventBits_t target_bit = (1 << (offset + expected_state));
+
+    // Block calling thread until bit is set
+    EventBits_t result = xEventGroupWaitBits(
+        g_state_event_group,
+        target_bit,
+        pdFALSE,        // Do not clear bit on exit
+        pdTRUE,         // Wait for bit to set
+        timeout_ticks
+    );
+
+    return (result & target_bit) != 0;
+}
+
+void CoreState_Get(CoreSystemStateMatrix_t* p_out_state) {
+    if (p_out_state == NULL) return;
+    if (g_state_mutex != NULL && xSemaphoreTake(g_state_mutex, portMAX_DELAY) == pdTRUE) {
+        *p_out_state = g_state_matrix;
+        xSemaphoreGive(g_state_mutex);
+    }
+}
+
+SystemMode_t CoreState_GetMode() {
+    SystemMode_t val = MODE_BOOT;
+    if (g_state_mutex != NULL && xSemaphoreTake(g_state_mutex, portMAX_DELAY) == pdTRUE) {
+        val = g_state_matrix.mode;
+        xSemaphoreGive(g_state_mutex);
+    }
+    return val;
+}
+
+NetworkState_t CoreState_GetNetwork() {
+    NetworkState_t val = NET_STATE_DISCONNECTED;
+    if (g_state_mutex != NULL && xSemaphoreTake(g_state_mutex, portMAX_DELAY) == pdTRUE) {
+        val = g_state_matrix.network;
+        xSemaphoreGive(g_state_mutex);
+    }
+    return val;
+}
+
+WebServerState_t CoreState_GetWebServer() {
+    WebServerState_t val = WEB_STATE_STOPPED;
+    if (g_state_mutex != NULL && xSemaphoreTake(g_state_mutex, portMAX_DELAY) == pdTRUE) {
+        val = g_state_matrix.web;
+        xSemaphoreGive(g_state_mutex);
+    }
+    return val;
+}
+
+MqttState_t CoreState_GetMqtt() {
+    MqttState_t val = MQTT_STATE_DISCONNECTED;
+    if (g_state_mutex != NULL && xSemaphoreTake(g_state_mutex, portMAX_DELAY) == pdTRUE) {
+        val = g_state_matrix.mqtt;
+        xSemaphoreGive(g_state_mutex);
+    }
+    return val;
+}
+
+bool CoreState_GetStorageStatus() {
+    bool val = false;
+    if (g_state_mutex != NULL && xSemaphoreTake(g_state_mutex, portMAX_DELAY) == pdTRUE) {
+        val = g_state_matrix.storage_ok;
+        xSemaphoreGive(g_state_mutex);
+    }
+    return val;
+}
+
+void CoreState_SetMode(SystemMode_t mode) {
+    if (g_state_mutex != NULL && xSemaphoreTake(g_state_mutex, portMAX_DELAY) == pdTRUE) {
+        g_state_matrix.mode = mode;
+        g_state_matrix.last_update = xTaskGetTickCount();
+        xSemaphoreGive(g_state_mutex);
+    }
+    UpdateDomainBits(SYSTEM_EVENT, (uint8_t)mode);
+}
+
+void CoreState_SetNetwork(NetworkState_t state) {
+    if (g_state_mutex != NULL && xSemaphoreTake(g_state_mutex, portMAX_DELAY) == pdTRUE) {
+        g_state_matrix.network = state;
+        g_state_matrix.last_update = xTaskGetTickCount();
+        xSemaphoreGive(g_state_mutex);
+    }
+    UpdateDomainBits(NETWORK_EVENT, (uint8_t)state);
+}
+
+void CoreState_SetWebServer(WebServerState_t state) {
+    if (g_state_mutex != NULL && xSemaphoreTake(g_state_mutex, portMAX_DELAY) == pdTRUE) {
+        g_state_matrix.web = state;
+        g_state_matrix.last_update = xTaskGetTickCount();
+        xSemaphoreGive(g_state_mutex);
+    }
+    UpdateDomainBits(WEB_EVENT, (uint8_t)state);
+}
+
+void CoreState_SetMqtt(MqttState_t state) {
+    if (g_state_mutex != NULL && xSemaphoreTake(g_state_mutex, portMAX_DELAY) == pdTRUE) {
+        g_state_matrix.mqtt = state;
+        g_state_matrix.last_update = xTaskGetTickCount();
+        xSemaphoreGive(g_state_mutex);
+    }
+    UpdateDomainBits(MQTT_EVENT, (uint8_t)state);
+}
+
+void CoreState_SetStorageStatus(bool is_ok) {
+    if (g_state_mutex != NULL && xSemaphoreTake(g_state_mutex, portMAX_DELAY) == pdTRUE) {
+        g_state_matrix.storage_ok = is_ok;
+        g_state_matrix.last_update = xTaskGetTickCount();
+        xSemaphoreGive(g_state_mutex);
+    }
+}
+
+void CoreEngine_Start() {
+    
+    // Load Configuration from LittleFS Flash Storage
+    if (!CoreState_Init())
+        return;
+    CoreState_SetMode(MODE_SETUP);
+    /* Read generic config registry from LittleFS */
+    loadConfig();
+    /* Load WiFi and Web module configurations */
+    loadWifiConfig();
+    loadWebConfig();
+
+    /* Starting intialize task */
+    // Task: WiFi State Monitoring & Auto-Reconnect Task (Priority 2)
+    xTaskCreatePinnedToCore(
+        vWifiTask,
+        "WifiTask",
+        4096,
+        NULL,
+        2,
+        NULL,
+        1
+    );
+
+    // Task: Web Server & System Monitor Task (Priority 1)
+    xTaskCreatePinnedToCore(
+       vWebMonitorTask,
+       "WebMonitorTask",
+       4096,
+       NULL,
+       1,
+       NULL,
+       1
+    );
+
+    // Task: Log & Command Processing Task (Priority 2)
+    xTaskCreatePinnedToCore(
+        vLogTask,
+        "LogTask",
+        4096,
+        NULL,
+        2,
+        NULL,
+        1
+    );
+}
+

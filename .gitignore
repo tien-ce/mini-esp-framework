@@ -7,12 +7,9 @@
 .vscode/
 *.swp
 *.tmp
-
+Images/
 # Configuration files containing sensitive credentials
-config_manager.cpp
-config_manager.h
-config_manager.*
-config.manager
+config.h
 
 # System and OS files
 .DS_Store
