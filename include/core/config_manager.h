@@ -51,29 +51,6 @@ String read_config(const String &module_name);
  */
 bool is_module_registered(const String &module_name);
 
-// ==================== RUNTIME SENSOR COUNTER ====================
-
-/**
- * @brief Gets the current runtime sensor count value in a thread-safe manner.
- * @param None
- * @return Current sensor count value.
- */
-int getSensorCount();
-
-/**
- * @brief Increments the runtime sensor count by 1 in a thread-safe manner.
- * @param None
- * @return None
- */
-void incrementSensorCount();
-
-/**
- * @brief Resets the runtime sensor count to zero in a thread-safe manner.
- * @param None
- * @return None
- */
-void resetSensorCount();
-
 #endif // CONFIG_MANAGER_H
 
 

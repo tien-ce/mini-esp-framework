@@ -94,7 +94,6 @@ void loadConfig() {
 }
 
 bool register_config_file(const String &module_name, const String &file_name) {
-    initMutexes();
     bool result = false;
     if (configMutex != NULL && xSemaphoreTake(configMutex, portMAX_DELAY) == pdTRUE) {
         String trimmedModule = module_name;
@@ -144,7 +143,6 @@ bool register_config_file(const String &module_name, const String &file_name) {
 }
 
 bool save_config(const String &module_name, const String &content) {
-    initMutexes();
     bool success = false;
     if (configMutex != NULL && xSemaphoreTake(configMutex, portMAX_DELAY) == pdTRUE) {
         String targetFile = "";
@@ -174,7 +172,6 @@ bool save_config(const String &module_name, const String &content) {
 }
 
 String read_config(const String &module_name) {
-    initMutexes();
     String content = "";
     if (configMutex != NULL && xSemaphoreTake(configMutex, portMAX_DELAY) == pdTRUE) {
         String targetFile = "";
@@ -205,7 +202,6 @@ String read_config(const String &module_name) {
 }
 
 bool is_module_registered(const String &module_name) {
-    initMutexes();
     bool registered = false;
     if (configMutex != NULL && xSemaphoreTake(configMutex, portMAX_DELAY) == pdTRUE) {
         for (const auto &entry : g_registry_list) {
@@ -218,30 +214,3 @@ bool is_module_registered(const String &module_name) {
     }
     return registered;
 }
-
-int getSensorCount() {
-    initMutexes();
-    int value = 0;
-    if (countMutex != NULL && xSemaphoreTake(countMutex, portMAX_DELAY) == pdTRUE) {
-        value = cnt;
-        xSemaphoreGive(countMutex);
-    }
-    return value;
-}
-
-void incrementSensorCount() {
-    initMutexes();
-    if (countMutex != NULL && xSemaphoreTake(countMutex, portMAX_DELAY) == pdTRUE) {
-        cnt++;
-        xSemaphoreGive(countMutex);
-    }
-}
-
-void resetSensorCount() {
-    initMutexes();
-    if (countMutex != NULL && xSemaphoreTake(countMutex, portMAX_DELAY) == pdTRUE) {
-        cnt = 0;
-        xSemaphoreGive(countMutex);
-    }
-}
-

@@ -10,5 +10,3 @@
 #define SerialComputer Serial
 
 #endif // HEADER_SENSOR_H
-
-

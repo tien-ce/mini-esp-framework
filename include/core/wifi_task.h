@@ -5,13 +5,6 @@
 #include <WiFi.h>
 #include "core/config_manager.h"
 
-// Static IP Network Constants
-#define USE_STATIC_IP true
-#define STATIC_IP "192.168.3.245"
-#define STATIC_GATEWAY "192.168.1.1"
-#define STATIC_SUBNET "255.255.252.0"
-#define STATIC_DNS1 "8.8.8.8"
-
 /**
  * @brief Loads WiFi module configuration from LittleFS wifi_config.txt file.
  * Registers "wifi" module with config_manager if not already registered.
@@ -19,13 +12,6 @@
  * @return None
  */
 void loadWifiConfig();
-
-/**
- * @brief Saves current in-memory WiFi configuration parameters to LittleFS.
- * @param None
- * @return None
- */
-void saveWifiConfig();
 
 /**
  * @brief Gets current WiFi SSID in a thread-safe manner.

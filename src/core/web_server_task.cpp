@@ -43,7 +43,7 @@ void loadWebConfig() {
             web_password = WEB_PASSWORD;
             web_port = WEB_PORT;
             saveWebConfig();
-            return;
+            goto out;
         }
 
         int pos = 0;
@@ -70,9 +70,10 @@ void loadWebConfig() {
                 }
             }
         }
-        xSemaphoreGive(webConfigMutex);
     }
     LOG_INFO("Web config loaded successfully.");
+out:
+	xSemaphoreGive(webConfigMutex);
 }
 
 void saveWebConfig() {
@@ -124,7 +125,7 @@ void updateWebConfig(uint16_t port, const String &user, const String &pass) {
 }
 
 // Web Server & WebSocket Instances
-AsyncWebServer server(8088);
+AsyncWebServer server(web_port);
 AsyncWebSocket ws("/ws");
 
 void onWsEvent(AsyncWebSocket *server, AsyncWebSocketClient *client, AwsEventType type,
@@ -359,6 +360,7 @@ void setupWebServer() {
  */
 void vWebMonitorTask(void *pvParameters) {
     waiting_on_event(NETWORK_EVENT, NET_STATE_WIFI_STA, portMAX_DELAY);
+	loadWebConfig();	
     setupWebServer();
     for (;;) {
         ws.cleanupClients();

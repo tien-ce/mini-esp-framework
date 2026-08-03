@@ -24,6 +24,16 @@ static void initWifiMutex() {
     }
 }
 
+static void saveWifiConfig() {
+    String content = "";
+    if (wifiConfigMutex != NULL && xSemaphoreTake(wifiConfigMutex, portMAX_DELAY) == pdTRUE) {
+        content += "ssid=" + wifi_ssid + "\n";
+        content += "pass=" + wifi_password + "\n";
+        xSemaphoreGive(wifiConfigMutex);
+    }
+    save_config("wifi", content);
+}
+
 void loadWifiConfig() {
     initWifiMutex();
     register_config_file("wifi", "wifi_config.txt");
@@ -36,7 +46,7 @@ void loadWifiConfig() {
             wifi_ssid = WIFI_SSID;
             wifi_password = WIFI_PASSWORD;
             saveWifiConfig();
-            return;
+			goto out;
         }
         int pos = 0;
         while (pos < raw.length()) {
@@ -61,50 +71,34 @@ void loadWifiConfig() {
                 }
             }
         }
-        xSemaphoreGive(wifiConfigMutex);
     }
     LOG_INFO("WiFi config loaded successfully.");
-}
-
-void saveWifiConfig() {
-    String content = "";
-    if (wifiConfigMutex != NULL && xSemaphoreTake(wifiConfigMutex, portMAX_DELAY) == pdTRUE) {
-        content += "ssid=" + wifi_ssid + "\n";
-        content += "pass=" + wifi_password + "\n";
-        xSemaphoreGive(wifiConfigMutex);
-    }
-    save_config("wifi", content);
+out:
+	xSemaphoreGive(wifiConfigMutex);
 }
 
 String getWifiSSID() {
     String val = "";
-    if (wifiConfigMutex != NULL && xSemaphoreTake(wifiConfigMutex, portMAX_DELAY) == pdTRUE) {
-        val = wifi_ssid;
-        xSemaphoreGive(wifiConfigMutex);
-    }
+	val = wifi_ssid;
     return val;
 }
 
 String getWifiPassword() {
     String val = "";
-    if (wifiConfigMutex != NULL && xSemaphoreTake(wifiConfigMutex, portMAX_DELAY) == pdTRUE) {
-        val = wifi_password;
-        xSemaphoreGive(wifiConfigMutex);
-    }
+	val = wifi_password;
     return val;
 }
 
 void updateWifiConfig(const String &newSsid, const String &newPass) {
     if (wifiConfigMutex != NULL && xSemaphoreTake(wifiConfigMutex, portMAX_DELAY) == pdTRUE) {
+		String content = "";
         wifi_ssid = newSsid;
         wifi_password = newPass;
+		content += "ssid=" + wifi_ssid + "\n";
+		content += "pass=" + wifi_password + "\n";
+		save_config("wifi", content);
         xSemaphoreGive(wifiConfigMutex);
     }
-    saveWifiConfig();
-}
-
-void updateConfig(const String &newSsid, const String &newPass) {
-    updateWifiConfig(newSsid, newPass);
 }
 
 bool is_wifi_connected() {
@@ -232,6 +226,7 @@ void setup_wifi() {
 void vWifiTask(void *pvParameters) {
     /* Wait until log initialized) */
     waiting_on_event(SYSTEM_EVENT, MODE_NORMAL, portMAX_DELAY);
+	loadWifiConfig();
     setup_wifi();
     for (;;) {
         if (!is_wifi_connected()) {

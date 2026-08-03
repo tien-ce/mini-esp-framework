@@ -13,10 +13,9 @@
 
 #include <Arduino.h>
 #include "core/core_engine.h"
-#include "drivers/e3f_r2c1_count.h"
 
 // ==================== ARDUINO INITIALIZATION ====================
-
+extern void initSensorTasks(); // Forward declaration for sensor task initialization
 /**
  * @brief Arduino setup entry point. Initializes Core Engine infrastructure and system tasks.
  * @param None
