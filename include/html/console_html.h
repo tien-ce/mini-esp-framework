@@ -3,11 +3,6 @@
 
 #include <Arduino.h>
 
-/**
- * @file console_html.h
- * @brief Embedded Web Dashboard UI - Tasmota Live Console Page.
- */
-
 const char CONSOLE_HTML[] PROGMEM = R"rawliteral(
 <!DOCTYPE html>
 <html>
@@ -44,8 +39,11 @@ a{text-decoration:none;}
 
 <script>
 const MAX_LINES=200;
-const authHeader='Basic '+btoa('%WEB_USERNAME%:%WEB_PASSWORD%');
-let gateway=`ws://${window.location.host}/ws`;
+const rawAuth = '%WEB_USERNAME%:%WEB_PASSWORD%';
+const authHeader = 'Basic ' + btoa(unescape(encodeURIComponent(rawAuth)));
+
+// Truyền thông tin đăng nhập trực tiếp vào kết nối WebSocket
+let gateway = `ws://${encodeURIComponent('%WEB_USERNAME%')}:${encodeURIComponent('%WEB_PASSWORD%')}@${window.location.host}/ws`;
 let wsConn;
 
 function initWS(){
@@ -55,7 +53,7 @@ function initWS(){
   wsConn.onmessage=(e)=>{
     let term=document.getElementById('terminal');
     let line=document.createElement('div');
-    line.innerHTML=e.data;
+    line.textContent=e.data; // Sử dụng textContent để bảo mật
     term.appendChild(line);
     while(term.children.length>MAX_LINES) term.removeChild(term.firstChild);
     term.scrollTop=term.scrollHeight;
@@ -63,7 +61,7 @@ function initWS(){
 }
 
 function sendCmd(cmd){
-  fetch('/cmd?msg='+cmd,{headers:{'Authorization':authHeader}})
+  fetch('/cmd?msg='+encodeURIComponent(cmd),{headers:{'Authorization':authHeader}})
     .then(r=>r.text()).then(d=>console.log(d))
     .catch(e=>console.log(e));
 }
@@ -77,14 +75,27 @@ function sendConsoleCmd(){
   }
 }
 
-function loadSystemInfo(){
-  fetch('/stats',{headers:{'Authorization':authHeader}})
-    .then(r=>r.json())
-    .then(d=>{
-      if(d.headerTitle) document.getElementById('deviceHeader').textContent=d.headerTitle;
-      if(d.headerSubTitle) document.getElementById('deviceSubHeader').textContent=d.headerSubTitle;
-      if(d.footerText) document.getElementById('footerText').textContent=d.footerText;
-    }).catch(e=>console.log(e));
+function loadSystemInfo() {
+  // 1. Check if system info already exists in sessionStorage
+  const cached = sessionStorage.getItem('sys_info');
+  if (cached) {
+    const d = JSON.parse(cached);
+    if (d.headerTitle) document.getElementById('deviceHeader').textContent = d.headerTitle;
+    if (d.headerSubTitle) document.getElementById('deviceSubHeader').textContent = d.headerSubTitle;
+    if (d.footerText) document.getElementById('footerText').textContent = d.footerText;
+    return; // Data retrieved from cache, skip fetching /stats
+  }
+
+  // 2. Fetch from ESP32 on first load and store in sessionStorage
+  fetch('/stats', { headers: { 'Authorization': authHeader } })
+    .then(r => r.json())
+    .then(d => {
+      sessionStorage.setItem('sys_info', JSON.stringify(d)); // Cache the retrieved JSON
+      if (d.headerTitle) document.getElementById('deviceHeader').textContent = d.headerTitle;
+      if (d.headerSubTitle) document.getElementById('deviceSubHeader').textContent = d.headerSubTitle;
+      if (d.footerText) document.getElementById('footerText').textContent = d.footerText;
+    })
+    .catch(e => console.log(e));
 }
 
 initWS();
@@ -94,4 +105,4 @@ loadSystemInfo();
 </html>
 )rawliteral";
 
-#endif // CONSOLE_HTML_H
+#endif

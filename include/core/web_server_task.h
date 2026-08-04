@@ -57,10 +57,7 @@ String getWebPassword();
  */
 void updateWebConfig(uint16_t port, const String &user, const String &pass);
 
-// External Server & WebSocket Handles
-extern AsyncWebServer server;
 extern AsyncWebSocket ws;
-
 /**
  * @brief AsyncWebSocket event handler for client connect, disconnect, and incoming data frames.
  * @param server Pointer to AsyncWebSocket instance.

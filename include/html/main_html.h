@@ -3,11 +3,6 @@
 
 #include <Arduino.h>
 
-/**
- * @file main_html.h
- * @brief Embedded Web Dashboard UI - Tasmota Main Menu Page.
- */
-
 const char MAIN_HTML[] PROGMEM = R"rawliteral(
 <!DOCTYPE html>
 <html>
@@ -45,16 +40,30 @@ a{text-decoration:none;}
 </div>
 
 <script>
-const authHeader='Basic '+btoa('%WEB_USERNAME%:%WEB_PASSWORD%');
+const rawAuth = '%WEB_USERNAME%:%WEB_PASSWORD%';
+const authHeader = 'Basic ' + btoa(unescape(encodeURIComponent(rawAuth)));
 
-function loadSystemInfo(){
-  fetch('/stats',{headers:{'Authorization':authHeader}})
-    .then(r=>r.json())
-    .then(d=>{
-      if(d.headerTitle) document.getElementById('deviceHeader').textContent=d.headerTitle;
-      if(d.headerSubTitle) document.getElementById('deviceSubHeader').textContent=d.headerSubTitle;
-      if(d.footerText) document.getElementById('footerText').textContent=d.footerText;
-    }).catch(e=>console.log(e));
+function loadSystemInfo() {
+  // 1. Check if system info already exists in sessionStorage
+  const cached = sessionStorage.getItem('sys_info');
+  if (cached) {
+    const d = JSON.parse(cached);
+    if (d.headerTitle) document.getElementById('deviceHeader').textContent = d.headerTitle;
+    if (d.headerSubTitle) document.getElementById('deviceSubHeader').textContent = d.headerSubTitle;
+    if (d.footerText) document.getElementById('footerText').textContent = d.footerText;
+    return; // Data retrieved from cache, skip fetching /stats
+  }
+
+  // 2. Fetch from ESP32 on first load and store in sessionStorage
+  fetch('/stats', { headers: { 'Authorization': authHeader } })
+    .then(r => r.json())
+    .then(d => {
+      sessionStorage.setItem('sys_info', JSON.stringify(d)); // Cache the retrieved JSON
+      if (d.headerTitle) document.getElementById('deviceHeader').textContent = d.headerTitle;
+      if (d.headerSubTitle) document.getElementById('deviceSubHeader').textContent = d.headerSubTitle;
+      if (d.footerText) document.getElementById('footerText').textContent = d.footerText;
+    })
+    .catch(e => console.log(e));
 }
 
 loadSystemInfo();
@@ -63,4 +72,4 @@ loadSystemInfo();
 </html>
 )rawliteral";
 
-#endif // MAIN_HTML_H
+#endif

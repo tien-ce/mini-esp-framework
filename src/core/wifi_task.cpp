@@ -38,43 +38,37 @@ void loadWifiConfig() {
     initWifiMutex();
     register_config_file("wifi", "wifi_config.txt");
     /* Init and save config */
-    if (wifiConfigMutex != NULL && xSemaphoreTake(wifiConfigMutex, portMAX_DELAY) == pdTRUE) {
-        String raw = read_config("wifi");
-        if (raw.length() == 0) {
-            /* Use default if config file is not found or empty */
-            LOG_INFO("WiFi config file not found or empty. Creating default wifi_config.txt");
-            wifi_ssid = WIFI_SSID;
-            wifi_password = WIFI_PASSWORD;
-            saveWifiConfig();
-			goto out;
-        }
-        int pos = 0;
-        while (pos < raw.length()) {
-            int nextPos = raw.indexOf('\n', pos);
-            if (nextPos == -1) nextPos = raw.length();
-            String line = raw.substring(pos, nextPos);
-            line.trim();
-            pos = nextPos + 1;
-
-            if (line.length() == 0) continue;
-            int eqIdx = line.indexOf('=');
-            if (eqIdx > 0) {
-                String key = line.substring(0, eqIdx);
-                String val = line.substring(eqIdx + 1);
-                key.trim();
-                val.trim();
-
-                if (key.equalsIgnoreCase("ssid")) {
-                    wifi_ssid = val;
-                } else if (key.equalsIgnoreCase("pass")) {
-                    wifi_password = val;
-                }
-            }
-        }
-    }
+	String raw = read_config("wifi");
+	if (raw.length() == 0) {
+		/* Use default if config file is not found or empty */
+		LOG_INFO("WiFi config file not found or empty. Creating default wifi_config.txt");
+		wifi_ssid = WIFI_SSID;
+		wifi_password = WIFI_PASSWORD;
+		saveWifiConfig();
+		return;
+	}
+	int pos = 0;
+	while (pos < raw.length()) {
+		int nextPos = raw.indexOf('\n', pos);
+		if (nextPos == -1) nextPos = raw.length();
+		String line = raw.substring(pos, nextPos);
+		line.trim();
+		pos = nextPos + 1;
+		if (line.length() == 0) continue;
+		int eqIdx = line.indexOf('=');
+		if (eqIdx > 0) {
+			String key = line.substring(0, eqIdx);
+			String val = line.substring(eqIdx + 1);
+			key.trim();
+			val.trim();
+			if (key.equalsIgnoreCase("ssid")) {
+				wifi_ssid = val;
+			} else if (key.equalsIgnoreCase("pass")) {
+				wifi_password = val;
+			}
+		}
+	}
     LOG_INFO("WiFi config loaded successfully.");
-out:
-	xSemaphoreGive(wifiConfigMutex);
 }
 
 String getWifiSSID() {

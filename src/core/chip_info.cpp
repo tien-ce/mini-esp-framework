@@ -15,12 +15,12 @@
 
 // Internal encapsulated instance
 static esp_device_info_t s_device_info = {
-    .model = "UNKNOWN",
-    .cores = 0,
-    .revision = 0,
-    .features = 0,
-    .mac = {0},
-    .is_loaded = false
+    "UNKNOWN", // model
+    0,         // cores
+    0,         // revision
+    0,         // features
+    {0},       // mac
+    false      // is_loaded
 };
 
 static const char* parse_chip_model(esp_chip_model_t model) {
@@ -29,8 +29,6 @@ static const char* parse_chip_model(esp_chip_model_t model) {
         case CHIP_ESP32S2: return "ESP32-S2";
         case CHIP_ESP32S3: return "ESP32-S3";
         case CHIP_ESP32C3: return "ESP32-C3";
-        case CHIP_ESP32C6: return "ESP32-C6";
-        case CHIP_ESP32H2: return "ESP32-H2";
         default:           return "UNKNOWN";
     }
 }

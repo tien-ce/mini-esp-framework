@@ -18,10 +18,13 @@ static uint16_t web_port      = 0;
 static String web_username    = "";
 static String web_password    = "";
 
+static AsyncWebServer *server= NULL;
+AsyncWebSocket ws("/ws");
+
 static SemaphoreHandle_t webConfigMutex = NULL;
 
 /**
- * @brief Initializes the FreeRTOS mutex for protecting Web server configuration.
+ * @brief Initializes the FreeRTOS mutex for protecting Web server->configuration.
  * @param None
  * @return None
  */
@@ -36,44 +39,40 @@ void loadWebConfig() {
     initWebMutex();
 
     String raw = read_config("web");
-    if (webConfigMutex != NULL && xSemaphoreTake(webConfigMutex, portMAX_DELAY) == pdTRUE) {
-        if (raw.length() == 0) {
-            LOG_INFO("Web config file not found or empty. Creating default web_config.txt");
-            web_username = WEB_USERNAME;
-            web_password = WEB_PASSWORD;
-            web_port = WEB_PORT;
-            saveWebConfig();
-            goto out;
-        }
+    if (raw.length() == 0) {
+        LOG_INFO("web config file not found or empty. creating default web_config.txt");
+		web_username = WEB_USERNAME;
+		web_password = WEB_PASSWORD;
+		web_port = WEB_PORT;
+        saveWebConfig();
+        return;
+    }
 
-        int pos = 0;
-        while (pos < raw.length()) {
-            int nextPos = raw.indexOf('\n', pos);
-            if (nextPos == -1) nextPos = raw.length();
-            String line = raw.substring(pos, nextPos);
-            line.trim();
-            pos = nextPos + 1;
+    int pos = 0;
+    while (pos < raw.length()) {
+        int nextpos = raw.indexOf('\n', pos);
+        if (nextpos == -1) nextpos = raw.length();
+        String line = raw.substring(pos, nextpos);
+        line.trim();
+        pos = nextpos + 1;
 
-            if (line.length() == 0) continue;
-            int eqIdx = line.indexOf('=');
-            if (eqIdx > 0) {
-                String key = line.substring(0, eqIdx);
-                String val = line.substring(eqIdx + 1);
-                key.trim();
-                val.trim();
-                if (key.equalsIgnoreCase("port")) {
-                    web_port = (uint16_t)val.toInt();
-                } else if (key.equalsIgnoreCase("username")) {
-                    web_username = val;
-                } else if (key.equalsIgnoreCase("password")) {
-                    web_password = val;
-                }
+        if (line.length() == 0) continue;
+        int eqidx = line.indexOf('=');
+        if (eqidx > 0) {
+            String key = line.substring(0, eqidx);
+            String val = line.substring(eqidx + 1);
+            key.trim();
+            val.trim();
+            if (key.equalsIgnoreCase("port")) {
+                web_port = (uint16_t)val.toInt();
+            } else if (key.equalsIgnoreCase("username")) {
+                web_username = val;
+            } else if (key.equalsIgnoreCase("password")) {
+                web_password = val;
             }
         }
     }
-    LOG_INFO("Web config loaded successfully.");
-out:
-	xSemaphoreGive(webConfigMutex);
+    LOG_INFO("web config loaded successfully.");
 }
 
 void saveWebConfig() {
@@ -88,30 +87,15 @@ void saveWebConfig() {
 }
 
 uint16_t getWebPort() { 
-    uint16_t val = 8088;
-    if (webConfigMutex != NULL && xSemaphoreTake(webConfigMutex, portMAX_DELAY) == pdTRUE) {
-        val = web_port;
-        xSemaphoreGive(webConfigMutex);
-    }
-    return val;
+    return web_port;
 }
 
 String getWebUsername() {
-    String val = "";
-    if (webConfigMutex != NULL && xSemaphoreTake(webConfigMutex, portMAX_DELAY) == pdTRUE) {
-        val = web_username;
-        xSemaphoreGive(webConfigMutex);
-    }
-    return val;
+    return web_username;
 }
 
 String getWebPassword() {
-    String val = "";
-    if (webConfigMutex != NULL && xSemaphoreTake(webConfigMutex, portMAX_DELAY) == pdTRUE) {
-        val = web_password;
-        xSemaphoreGive(webConfigMutex);
-    }
-    return val;
+    return web_password;
 }
 
 void updateWebConfig(uint16_t port, const String &user, const String &pass) {
@@ -125,8 +109,6 @@ void updateWebConfig(uint16_t port, const String &user, const String &pass) {
 }
 
 // Web Server & WebSocket Instances
-AsyncWebServer server(web_port);
-AsyncWebSocket ws("/ws");
 
 void onWsEvent(AsyncWebSocket *server, AsyncWebSocketClient *client, AwsEventType type,
                void *arg, uint8_t *data, size_t len) {
@@ -151,13 +133,20 @@ void onWsEvent(AsyncWebSocket *server, AsyncWebSocketClient *client, AwsEventTyp
 }
 
 void setupWebServer() {
+	uint16_t port = getWebPort();
+	if (server != NULL) {
+		LOG_INFO("Cleaning up old server instance...");
+		delete server;
+		server = NULL;
+	}
+    server = new AsyncWebServer(port);
     // WebSocket Setup
     ws.setAuthentication(getWebUsername().c_str(), getWebPassword().c_str());
     ws.onEvent(onWsEvent);
-    server.addHandler(&ws);
+    server->addHandler(&ws);
 
     // Page 1: Main Menu UI
-    server.on("/", HTTP_GET, [](AsyncWebServerRequest *request) {
+    server->on("/", HTTP_GET, [](AsyncWebServerRequest *request) {
         if (!request->authenticate(getWebUsername().c_str(), getWebPassword().c_str())) {
             return request->requestAuthentication();
         }
@@ -165,7 +154,7 @@ void setupWebServer() {
     });
 
     // Page 2: Information UI
-    server.on("/info", HTTP_GET, [](AsyncWebServerRequest *request) {
+    server->on("/info", HTTP_GET, [](AsyncWebServerRequest *request) {
         if (!request->authenticate(getWebUsername().c_str(), getWebPassword().c_str())) {
             return request->requestAuthentication();
         }
@@ -177,7 +166,7 @@ void setupWebServer() {
     });
 
     // Page 3: Tools UI
-    server.on("/tools", HTTP_GET, [](AsyncWebServerRequest *request) {
+    server->on("/tools", HTTP_GET, [](AsyncWebServerRequest *request) {
         if (!request->authenticate(getWebUsername().c_str(), getWebPassword().c_str())) {
             return request->requestAuthentication();
         }
@@ -185,7 +174,7 @@ void setupWebServer() {
     });
 
     // Page 4: Console UI
-    server.on("/console", HTTP_GET, [](AsyncWebServerRequest *request) {
+    server->on("/console", HTTP_GET, [](AsyncWebServerRequest *request) {
         if (!request->authenticate(getWebUsername().c_str(), getWebPassword().c_str())) {
             return request->requestAuthentication();
         }
@@ -196,7 +185,7 @@ void setupWebServer() {
     });
 
     // Page 5: Firmware Upgrade UI
-    server.on("/ota", HTTP_GET, [](AsyncWebServerRequest *request) {
+    server->on("/ota", HTTP_GET, [](AsyncWebServerRequest *request) {
         if (!request->authenticate(getWebUsername().c_str(), getWebPassword().c_str())) {
             return request->requestAuthentication();
         }
@@ -208,10 +197,10 @@ void setupWebServer() {
 
 
     // Endpoint: Device Telemetry & Statistics
-    server.on("/stats", HTTP_GET, [](AsyncWebServerRequest *request) {
-        if (!request->authenticate(getWebUsername().c_str(), getWebPassword().c_str())) {
-            return request->requestAuthentication();
-        }
+    server->on("/stats", HTTP_GET, [](AsyncWebServerRequest *request) {
+        // if (!request->authenticate(getWebUsername().c_str(), getWebPassword().c_str())) {
+        //     return request->requestAuthentication();
+        // }
 
         String json = "{";
         json += "\"uptime\":" + String(millis() / 1000) + ",";
@@ -239,7 +228,7 @@ void setupWebServer() {
 
 
     // Endpoint: Retrieve Device Configuration
-    server.on("/getConfig", HTTP_GET, [](AsyncWebServerRequest *request) {
+    server->on("/getConfig", HTTP_GET, [](AsyncWebServerRequest *request) {
         if (!request->authenticate(getWebUsername().c_str(), getWebPassword().c_str())) {
             return request->requestAuthentication();
         }
@@ -252,7 +241,7 @@ void setupWebServer() {
     });
 
     // Endpoint: Update Device Configuration
-    server.on("/saveConfig", HTTP_POST, [](AsyncWebServerRequest *request) {}, NULL,
+    server->on("/saveConfig", HTTP_POST, [](AsyncWebServerRequest *request) {}, NULL,
         [](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total) {
             if (!request->authenticate(getWebUsername().c_str(), getWebPassword().c_str())) {
                 return request->requestAuthentication();
@@ -278,7 +267,7 @@ void setupWebServer() {
     );
 
     // Endpoint: Execute System Commands
-    server.on("/cmd", HTTP_GET, [](AsyncWebServerRequest *request) {
+    server->on("/cmd", HTTP_GET, [](AsyncWebServerRequest *request) {
         if (!request->authenticate(getWebUsername().c_str(), getWebPassword().c_str())) {
             return request->requestAuthentication();
         }
@@ -297,7 +286,7 @@ void setupWebServer() {
     });
 
     // Endpoint: Reset Configuration to Defaults
-    server.on("/resetConfig", HTTP_GET, [](AsyncWebServerRequest *request) {
+    server->on("/resetConfig", HTTP_GET, [](AsyncWebServerRequest *request) {
         if (!request->authenticate(getWebUsername().c_str(), getWebPassword().c_str())) {
             return request->requestAuthentication();
         }
@@ -313,7 +302,7 @@ void setupWebServer() {
 
 
     // Endpoint: OTA Firmware Upload Handler
-    server.on("/doUpdate", HTTP_POST,
+    server->on("/doUpdate", HTTP_POST,
         [](AsyncWebServerRequest *request) {
             if (!request->authenticate(getWebUsername().c_str(), getWebPassword().c_str())) {
                 return request->requestAuthentication();
@@ -345,7 +334,7 @@ void setupWebServer() {
         }
     );
 
-    server.begin();
+    server->begin();
     setWebLogReady();
     Serial.println("Web Server started on port " + String(getWebPort()));
     Serial.println("Open: http://" + WiFi.localIP().toString() + ":" + String(getWebPort()));
