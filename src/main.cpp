@@ -25,7 +25,7 @@ void setup() {
     // 1. Boot Core Engine Infrastructure (LittleFS, Log, WiFi, WebServer, Core Tasks)
     CoreEngine_Start();
     // 2. Application Layer: Initialize Hardware GPIO & Sensor Tasks
-    initSensorTasks();
+    // initSensorTasks();
 
     Serial.println("=== Initialization Complete & Multitasking System Running ===\n");
 }

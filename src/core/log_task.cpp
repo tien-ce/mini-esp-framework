@@ -218,7 +218,7 @@ void initLogTask() {
         commandQueue = xQueueCreate(10, sizeof(CommandPacket));
     }
     Serial.begin(SERIAL_BAUDRATE);
-    Serial.onReceive([]() {
+    Serial.onEvent(ARDUINO_HW_CDC_RX_EVENT, [](void* arg, esp_event_base_t base, int32_t id, void* data) {
         static String serialBuf = "";
         while (Serial.available()) {
             char c = (char)Serial.read();
@@ -233,12 +233,6 @@ void initLogTask() {
             }
         }
     });
-
-    setSerialLogReady();
-    LOG_INFO("Init log task done"); 
-    register_cmd(CMD_SET_LOG_LEVEL, setLogLevel);
-    register_cmd(CMD_GET_LOG_LEVEL, getLogLevel);
-    register_cmd(CMD_LIST_LOG_LEVEL, listLogLevel);
 }
 
 
@@ -303,9 +297,12 @@ void vLogTask(void *pvParameters) {
     waiting_on_event(SYSTEM_EVENT, MODE_SETUP, portMAX_DELAY);
     CommandPacket packet;
     initLogTask();
-    CoreState_SetMode(MODE_NORMAL);
+    setSerialLogReady();
+    LOG_INFO("Init log task done"); 
+    register_cmd(CMD_SET_LOG_LEVEL, setLogLevel);
+    register_cmd(CMD_GET_LOG_LEVEL, getLogLevel);
+    register_cmd(CMD_LIST_LOG_LEVEL, listLogLevel);
     LOG_INFO("vLogTask started, sleeping until command arrives...");
-
     for (;;) {
         // Sleep indefinitely on commandQueue (0% CPU usage while sleeping)
         if (commandQueue != NULL && xQueueReceive(commandQueue, &packet, portMAX_DELAY) == pdPASS) {

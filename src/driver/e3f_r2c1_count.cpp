@@ -1,6 +1,7 @@
+#include "config.h"
+#ifdef USE_E3FR2C1_COUNT
 #include "core/wifi_task.h"
 #include "core/core_engine.h"
-#include "config.h"
 #include <HTTPClient.h>
 #include "Header_sensor.h"
 #include <esp_task_wdt.h>
@@ -254,3 +255,5 @@ void initSensorTasks() {
     //    1
     //);
 }
+
+#endif // USE_E3FR2C1_COUNT

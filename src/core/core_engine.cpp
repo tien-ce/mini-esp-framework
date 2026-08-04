@@ -188,32 +188,16 @@ void CoreState_SetStorageStatus(bool is_ok) {
 }
 
 void CoreEngine_Start() {
-    // Load Configuration from LittleFS Flash Storage
+
+
+    // Initialize state mutex & event group FIRST: vLogTask (created below) touches
+    // g_state_event_group as soon as it runs, and it can preempt this task the
+    // instant it's created (higher priority, same core). If the event group didn't
+    // exist yet, waiting_on_event() would bail out immediately instead of blocking.
     if (!CoreState_Init())
-        return;
+      return;
     /* Starting intialize task */
-    // // Task: WiFi State Monitoring & Auto-Reconnect Task (Priority 2)
-    // xTaskCreatePinnedToCore(
-    //     vWifiTask,
-    //     "WifiTask",
-    //     4096,
-    //     NULL,
-    //     2,
-    //     NULL,
-    //     1
-    // );
-
-    // // Task: Web Server & System Monitor Task (Priority 1)
-    // xTaskCreatePinnedToCore(
-    //    vWebMonitorTask,
-    //    "WebMonitorTask",
-    //    4096,
-    //    NULL,
-    //    1,
-    //    NULL,
-    //    1
-    // );
-
+    CoreState_SetMode(MODE_SETUP);
     // Task: Log & Command Processing Task (Priority 2)
     xTaskCreatePinnedToCore(
         vLogTask,
@@ -224,6 +208,29 @@ void CoreEngine_Start() {
         NULL,
         1
     );
-    CoreState_SetMode(MODE_SETUP);
+    // Task: WiFi State Monitoring & Auto-Reconnect Task (Priority 2)
+    xTaskCreatePinnedToCore(
+        vWifiTask,
+        "WifiTask",
+        4096,
+        NULL,
+        2,
+        NULL,
+        1
+    );
+
+    // Task: Web Server & System Monitor Task (Priority 1)
+    xTaskCreatePinnedToCore(
+       vWebMonitorTask,
+       "WebMonitorTask",
+       4096,
+       NULL,
+       1,
+       NULL,
+       1
+    );
+
+    
+    waiting_on_event(SYSTEM_EVENT, MODE_NORMAL, pdMS_TO_TICKS(5000));
 }
 
