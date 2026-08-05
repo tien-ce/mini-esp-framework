@@ -1,7 +1,6 @@
 #include "core/wifi_task.h"
 #include "core/log_task.h"
 #include "core/core_engine.h"
-#include "core/chip_info.h"
 #include "config.h"
 #include <ESP32Ping.h>
 #include <semphr.h>
@@ -152,11 +151,7 @@ void setup_wifi() {
     CoreState_SetNetwork(NET_STATE_CONNECTING);
     WiFi.mode(WIFI_STA);
     
-    // Read ESP32 MAC Address
-    char macStr[18];
-    esp_info_get_mac_str(macStr);
     LOG_INFO("--- WIFI Configuration ---");
-    LOG_INFO("Device MAC Address: " + String(macStr));
     LOG_INFO("WiFi SSID: " + getWifiSSID());
     LOG_INFO("Static IP: " + String(STATIC_IP));
     LOG_INFO("----------------------------");

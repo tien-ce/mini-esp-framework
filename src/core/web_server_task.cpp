@@ -2,7 +2,7 @@
 #include "core/log_task.h"
 #include "core/wifi_task.h"
 #include "core/core_engine.h"
-#include "core/chip_info.h"
+#include "core/info.h"
 #include "config.h"
 #include "html/main_html.h"
 #include "html/info_html.h"
@@ -32,6 +32,30 @@ static void initWebMutex() {
     if (webConfigMutex == NULL) {
         webConfigMutex = xSemaphoreCreateMutex();
     }
+}
+
+/**
+ * @brief Renders HTML templates by manually replacing placeholders.
+ * Avoids ESPAsyncWebServer parser crashes caused by literal '%' in CSS/JS.
+ * 
+ * @param templateStr Raw HTML content from PROGMEM
+ * @return String Rendered HTML content
+ */
+static String renderTemplate(const char* templateStr) {
+    String page = String(templateStr);
+    
+    page.replace("%HEADER_TITLE%", "ESP32S3");
+    page.replace("%HEADER_SUBTITLE%", "ESP mini framework " + String(FIRMWARE_VERSION));
+    page.replace("%FOOTER_TEXT%", "ESP mini framework " + String(FIRMWARE_VERSION) + " by Văn Tiến");
+    page.replace("%APP_VERSION%", String(FIRMWARE_VERSION));
+    page.replace("%BUILD_DATE%", String(__DATE__) + " " + String(__TIME__));
+    page.replace("%SDK_VERSION%", String(ESP.getSdkVersion()));
+    page.replace("%HOSTNAME%", "tasmota-" + WiFi.macAddress());
+    page.replace("%CHIP_MODEL%", String(esp_info_get_model()));
+    page.replace("%MAC_ADDR%", String(esp_info_get_mac_str()));
+    page.replace("%FLASH_SIZE%", String(ESP.getFlashChipSize() / 1024) + " KB");
+
+    return page;
 }
 
 void loadWebConfig() {
@@ -139,6 +163,8 @@ void setupWebServer() {
 		delete server;
 		server = NULL;
 	}
+    DefaultHeaders::Instance().addHeader("Access-Control-Allow-Origin", "*");
+    DefaultHeaders::Instance().addHeader("Access-Control-Allow-Headers", "Authorization, Content-Type");
     server = new AsyncWebServer(port);
     // WebSocket Setup
     ws.setAuthentication(getWebUsername().c_str(), getWebPassword().c_str());
@@ -150,7 +176,7 @@ void setupWebServer() {
         if (!request->authenticate(getWebUsername().c_str(), getWebPassword().c_str())) {
             return request->requestAuthentication();
         }
-        request->send(200, "text/html", MAIN_HTML);
+        request->send(200, "text/html", renderTemplate(MAIN_HTML));
     });
 
     // Page 2: Information UI
@@ -158,11 +184,7 @@ void setupWebServer() {
         if (!request->authenticate(getWebUsername().c_str(), getWebPassword().c_str())) {
             return request->requestAuthentication();
         }
-        String html = String(INFO_HTML);
-        html.replace("%LOCAL_IP%", WiFi.localIP().toString());
-        html.replace("%WEB_USERNAME%", getWebUsername());
-        html.replace("%WEB_PASSWORD%", getWebPassword());
-        request->send(200, "text/html", html);
+        request->send(200, "text/html", renderTemplate(INFO_HTML));
     });
 
     // Page 3: Tools UI
@@ -170,7 +192,7 @@ void setupWebServer() {
         if (!request->authenticate(getWebUsername().c_str(), getWebPassword().c_str())) {
             return request->requestAuthentication();
         }
-        request->send(200, "text/html", TOOLS_HTML);
+        request->send(200, "text/html", renderTemplate(TOOLS_HTML));
     });
 
     // Page 4: Console UI
@@ -178,10 +200,7 @@ void setupWebServer() {
         if (!request->authenticate(getWebUsername().c_str(), getWebPassword().c_str())) {
             return request->requestAuthentication();
         }
-        String html = String(CONSOLE_HTML);
-        html.replace("%WEB_USERNAME%", getWebUsername());
-        html.replace("%WEB_PASSWORD%", getWebPassword());
-        request->send(200, "text/html", html);
+        request->send(200, "text/html", renderTemplate(CONSOLE_HTML));
     });
 
     // Page 5: Firmware Upgrade UI
@@ -189,40 +208,28 @@ void setupWebServer() {
         if (!request->authenticate(getWebUsername().c_str(), getWebPassword().c_str())) {
             return request->requestAuthentication();
         }
-        String html = String(OTA_HTML);
-        html.replace("%WEB_USERNAME%", getWebUsername());
-        html.replace("%WEB_PASSWORD%", getWebPassword());
-        request->send(200, "text/html", html);
+        request->send(200, "text/html", renderTemplate(OTA_HTML));
     });
-
-
-    // Endpoint: Device Telemetry & Statistics
+    
+    server->onNotFound([](AsyncWebServerRequest *request) {
+        Serial.printf("[Web Error] Not Found / Internal error on URL: %s\n", request->url().c_str());
+        request->send(404, "text/plain", "Not found");
+    });
+    // Endpoint: Dynamic Telemetry Data Only
     server->on("/stats", HTTP_GET, [](AsyncWebServerRequest *request) {
-        // if (!request->authenticate(getWebUsername().c_str(), getWebPassword().c_str())) {
-        //     return request->requestAuthentication();
-        // }
-
         String json = "{";
         json += "\"uptime\":" + String(millis() / 1000) + ",";
         json += "\"freeHeap\":" + String(ESP.getFreeHeap()) + ",";
         json += "\"rssi\":" + String(WiFi.RSSI()) + ",";
-        json += "\"mac\":\"" + WiFi.macAddress() + "\",";
         json += "\"ip\":\"" + WiFi.localIP().toString() + "\",";
         json += "\"gw\":\"" + WiFi.gatewayIP().toString() + "\",";
         json += "\"mask\":\"" + WiFi.subnetMask().toString() + "\",";
-        json += "\"dns1\":\"" + WiFi.dnsIP().toString() + "\",";
-        json += "\"dns2\":\"0.0.0.0\",";
-        json += "\"programVersion\":\"15.5.0.1 (tasmota32)\",";
-        json += "\"buildDate\":\"" + String(__DATE__) + "T" + String(__TIME__) + "\",";
-        json += "\"sdkVersion\":\"" + String(ESP.getSdkVersion()) + "\",";
-        json += "\"hostname\":\"tasmota-" + WiFi.macAddress() + "\",";
-        json += "\"chipModel\":\"" + String(ESP.getChipModel()) + "\",";
-        json += "\"flashSize\":\"" + String(ESP.getFlashChipSize() / 1024) + " KB\",";
-        json += "\"headerTitle\":\"ESP32S3\",";
-        json += "\"headerSubTitle\":\"ESP mini framework " + String(FIRMWARE_VERSION) + "\",";
-        json += "\"footerText\":\"ESP mini framework " + String(FIRMWARE_VERSION) + " by Văn Tiến\"";
+        json += "\"dns1\":\"" + WiFi.dnsIP().toString() + "\"";
         json += "}";
-        request->send(200, "application/json", json);
+
+        AsyncWebServerResponse *response = request->beginResponse(200, "application/json", json);
+        response->addHeader("Access-Control-Allow-Origin", "*");
+        request->send(response);
     });
 
 
