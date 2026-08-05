@@ -9,7 +9,7 @@ const char OTA_HTML[] PROGMEM = R"rawliteral(
 <head>
 <meta charset='UTF-8'>
 <meta name='viewport' content='width=device-width, initial-scale=1'>
-<title>Tasmota - Firmware Upgrade</title>
+<title>Firmware Upgrade</title>
 <style>
 *{margin:0;padding:0;box-sizing:border-box;}
 body{font-family:Arial,sans-serif;background:#232323;color:#ffffff;text-align:center;padding:20px 10px;}
@@ -34,8 +34,8 @@ a{text-decoration:none;}
 </head>
 <body>
 <div class='wrapper'>
-<h1 id='deviceHeader'>...</h1>
-<h2 id='deviceSubHeader'>...</h2>
+<h1 id='deviceHeader'>%HEADER_TITLE%</h1>
+<h2 id='deviceSubHeader'>%HEADER_SUBTITLE%</h2>
 
 <div class='section-header'>Firmware Upgrade</div>
 <fieldset>
@@ -56,62 +56,46 @@ a{text-decoration:none;}
 
 <a href='/'><button>Main Menu</button></a>
 
-<div class='footer-text' id='footerText'></div>
+<div class='footer-text' id='footerText'>%FOOTER_TEXT%</div>
 </div>
 
 <script>
-const rawAuth = '%WEB_USERNAME%:%WEB_PASSWORD%';
-const authHeader = 'Basic ' + btoa(unescape(encodeURIComponent(rawAuth)));
-
-function loadSystemInfo() {
-  // 1. Check if system info already exists in sessionStorage
-  const cached = sessionStorage.getItem('sys_info');
-  if (cached) {
-    const d = JSON.parse(cached);
-    if (d.headerTitle) document.getElementById('deviceHeader').textContent = d.headerTitle;
-    if (d.headerSubTitle) document.getElementById('deviceSubHeader').textContent = d.headerSubTitle;
-    if (d.footerText) document.getElementById('footerText').textContent = d.footerText;
-    return; // Data retrieved from cache, skip fetching /stats
-  }
-
-  // 2. Fetch from ESP32 on first load and store in sessionStorage
-  fetch('/stats', { headers: { 'Authorization': authHeader } })
-    .then(r => r.json())
-    .then(d => {
-      sessionStorage.setItem('sys_info', JSON.stringify(d)); // Cache the retrieved JSON
-      if (d.headerTitle) document.getElementById('deviceHeader').textContent = d.headerTitle;
-      if (d.headerSubTitle) document.getElementById('deviceSubHeader').textContent = d.headerSubTitle;
-      if (d.footerText) document.getElementById('footerText').textContent = d.footerText;
-    })
-    .catch(e => console.log(e));
-}
-
-document.getElementById('uploadForm').onsubmit=async(e)=>{
+document.getElementById('uploadForm').onsubmit = async (e) => {
   e.preventDefault();
-  const file=document.getElementById('file').files[0];
-  if(!file){alert('Select a file');return;}
-  const st=document.getElementById('status');
-  st.style.display='block';
-  st.className='success-msg';
-  st.textContent='Uploading firmware...';
-  const formData=new FormData();
-  formData.append('file',file);
-  try{
-    const xhr=new XMLHttpRequest();
-    xhr.onload=()=>{
-      if(xhr.status===200){st.className='success-msg';st.textContent='Upload OK! Rebooting...';setTimeout(()=>window.location.href='/',5000);}
-      else{st.className='error-msg';st.textContent='Upload failed!';}
+  const file = document.getElementById('file').files[0];
+  if (!file) { alert('Select a file'); return; }
+  
+  const st = document.getElementById('status');
+  st.style.display = 'block';
+  st.className = 'success-msg';
+  st.textContent = 'Uploading firmware...';
+  
+  const formData = new FormData();
+  formData.append('file', file);
+  
+  try {
+    const xhr = new XMLHttpRequest();
+    xhr.onload = () => {
+      if (xhr.status === 200) {
+        st.className = 'success-msg';
+        st.textContent = 'Upload OK! Rebooting...';
+        setTimeout(() => window.location.href = '/', 5000);
+      } else {
+        st.className = 'error-msg';
+        st.textContent = 'Upload failed!';
+      }
     };
-    xhr.onerror=()=>{st.className='error-msg';st.textContent='Connection error!';};
-    xhr.open('POST','/doUpdate');
-    xhr.setRequestHeader('Authorization',authHeader);
+    xhr.onerror = () => {
+      st.className = 'error-msg';
+      st.textContent = 'Connection error!';
+    };
+    xhr.open('POST', '/doUpdate');
     xhr.send(formData);
-  }catch(err){
-    st.className='error-msg';st.textContent='Error: '+err.message;
+  } catch (err) {
+    st.className = 'error-msg';
+    st.textContent = 'Error: ' + err.message;
   }
 };
-
-loadSystemInfo();
 </script>
 </body>
 </html>
