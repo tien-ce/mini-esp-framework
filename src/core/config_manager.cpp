@@ -12,10 +12,6 @@ struct ModuleRegistryEntry {
 };
 
 static std::vector<ModuleRegistryEntry> g_registry_list;
-
-// Runtime state variables & mutexes
-static int cnt = 0;
-static SemaphoreHandle_t countMutex = NULL;
 static SemaphoreHandle_t configMutex = NULL;
 
 /**
@@ -24,9 +20,6 @@ static SemaphoreHandle_t configMutex = NULL;
  * @return None
  */
 static void initMutexes() {
-    if (countMutex == NULL) {
-        countMutex = xSemaphoreCreateMutex();
-    }
     if (configMutex == NULL) {
         configMutex = xSemaphoreCreateMutex();
     }
@@ -80,16 +73,13 @@ static void load_registry_list_internal() {
 }
 
 
-void loadConfig() {
+void config_manager_init() {
     initMutexes();
-    if (configMutex != NULL && xSemaphoreTake(configMutex, portMAX_DELAY) == pdTRUE) {
-        if (!LittleFS.begin(true)) {
-            LOG_ERROR("LittleFS Mount Failed!");
-        } else {
-            LOG_INFO("LittleFS Mounted Successfully.");
-            load_registry_list_internal();
-        }
-        xSemaphoreGive(configMutex);
+    if (!LittleFS.begin(true)) {
+        LOG_ERROR("LittleFS Mount Failed!");
+    } else {
+        LOG_INFO("LittleFS Mounted Successfully.");
+        load_registry_list_internal();
     }
 }
 
@@ -173,44 +163,37 @@ bool save_config(const String &module_name, const String &content) {
 
 String read_config(const String &module_name) {
     String content = "";
-    if (configMutex != NULL && xSemaphoreTake(configMutex, portMAX_DELAY) == pdTRUE) {
-        String targetFile = "";
-        for (const auto &entry : g_registry_list) {
-            if (entry.module_name == module_name) {
-                targetFile = entry.file_name;
-                break;
+    String targetFile = "";
+    for (const auto &entry : g_registry_list) {
+        if (entry.module_name == module_name) {
+            targetFile = entry.file_name;
+            break;
+        }
+    }
+    if (targetFile.length() > 0) {
+        String path = targetFile.startsWith("/") ? targetFile : "/" + targetFile;
+        if (LittleFS.exists(path)) {
+            File f = LittleFS.open(path, "r");
+            if (f) {
+                content = f.readString();
+                f.close();
+            } else {
+                LOG_ERROR("Failed to open file for reading: " + path);
             }
         }
-
-        if (targetFile.length() > 0) {
-            String path = targetFile.startsWith("/") ? targetFile : "/" + targetFile;
-            if (LittleFS.exists(path)) {
-                File f = LittleFS.open(path, "r");
-                if (f) {
-                    content = f.readString();
-                    f.close();
-                } else {
-                    LOG_ERROR("Failed to open file for reading: " + path);
-                }
-            }
-        } else {
-            LOG_ERROR("Cannot read config: Module '" + module_name + "' is not registered.");
-        }
-        xSemaphoreGive(configMutex);
+    } else {
+        LOG_ERROR("Cannot read config: Module '" + module_name + "' is not registered.");
     }
     return content;
 }
 
 bool is_module_registered(const String &module_name) {
     bool registered = false;
-    if (configMutex != NULL && xSemaphoreTake(configMutex, portMAX_DELAY) == pdTRUE) {
-        for (const auto &entry : g_registry_list) {
-            if (entry.module_name == module_name) {
-                registered = true;
-                break;
-            }
+    for (const auto &entry : g_registry_list) {
+        if (entry.module_name == module_name) {
+            registered = true;
+            break;
         }
-        xSemaphoreGive(configMutex);
     }
     return registered;
 }
