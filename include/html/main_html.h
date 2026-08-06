@@ -25,32 +25,34 @@ button.inactive{opacity:0.9;cursor:default;}
 a{text-decoration:none;}
 .data-table {
   width: 100%;
-  max-width: 400px;
-  min-width: 200px;
-  margin: 15px auto;
+  max-width: 320px;
+  margin: 10px auto 20px auto;
   border-collapse: collapse;
-  background: #2d2d2d;
-  border-radius: 6px;
-  overflow: hidden;
-  resize: horizontal;
+  background: transparent;
+  border-radius: 0;
+  overflow: visible;
+  resize: none;
 }
+
 .data-table td {
-  padding: 10px 15px;
-  border-bottom: 1px solid #444;
-  font-size: 16px;
-}
-.data-table tr:last-child td {
+  padding: 3px 8px;
   border-bottom: none;
+  font-size: 20px;
+  line-height: 1.3;
 }
+
 .data-table td.label {
   text-align: left;
-  color: #ccc;
+  color: #ffffff;
+  font-weight: bold;
 }
+
 .data-table td.value {
   text-align: right;
+  color: #ffffff;
   font-weight: bold;
-  color: #1fa3ec;
 }
+
 </style>
 </head>
 <body>
@@ -60,7 +62,8 @@ a{text-decoration:none;}
 <table class="data-table">
   %SENSOR_TABLE_ROWS%
 </table>
-<a href='/config'><button>Configuration</button></a>
+<a href='/console'><button>Console</button></a>
+<button class='inactive'>Configuration</button>
 <a href='/info'><button>Information</button></a>
 <a href='/ota'><button>Firmware Upgrade</button></a>
 <a href='/tools'><button>Tools</button></a>

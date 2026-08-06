@@ -59,9 +59,29 @@ bool is_pin_used(int8_t gpio) {
     return pin_table[gpio].name.length() > 0;
 }
 
+bool is_use_name(const String &name) {
+    if (name.length() == 0) return false;
+    for (int i = 0; i < MAX_GPIO_PINS; i++) {
+        if (pin_table[i].name.equalsIgnoreCase(name)) {
+            return true;
+        }
+    }
+    return false;
+}
+
 String get_pin_name(int8_t gpio) {
     if (gpio < 0 || gpio >= MAX_GPIO_PINS) return "";
     return pin_table[gpio].name;
+}
+
+int8_t get_gpio_by_name(const String &name) {
+    if (name.length() == 0) return GPIO_INVALID;
+    for (int i = 0; i < MAX_GPIO_PINS; i++) {
+        if (pin_table[i].name.equalsIgnoreCase(name)) {
+            return pin_table[i].gpio;
+        }
+    }
+    return GPIO_INVALID;
 }
 
 bool set_pin_name(int8_t gpio, const String& name) {

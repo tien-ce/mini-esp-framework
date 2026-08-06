@@ -11,6 +11,7 @@
 #include "html/ota_html.h"
 #include "html/config_html.h"
 #include "html/config_module_html.h"
+#include "core/pin_config.h"
 
 #include <Arduino.h>
 #include <WiFi.h>
@@ -47,6 +48,37 @@ static String formatUptime(uint32_t seconds) {
     return String(buf);
 }
 
+/** @brief Generates dynamic GPIO selector rows from BOARD_PINS and AVAILABLE_PIN_OPTIONS. */
+static String generatePinRows() {
+    String rows = "";
+    for (size_t i = 0; i < BOARD_PIN_COUNT; i++) {
+        const auto& pin = BOARD_PINS[i];
+        
+        if (pin.isFixed) {
+            rows += "<div class='form-row'>";
+            rows += "<label for='gpio" + String(pin.gpio) + "' class='gpio-red'>" + pin.label + "</label>";
+            rows += "<select id='gpio" + String(pin.gpio) + "' name='gpio" + String(pin.gpio) + "' disabled>";
+            rows += "<option value='-1' selected>" + String(pin.defaultOption) + "</option>";
+            rows += "</select></div>";
+        } else {
+            rows += "<div class='form-row'>";
+            rows += "<label for='gpio" + String(pin.gpio) + "'>" + pin.label + "</label>";
+            rows += "<select id='gpio" + String(pin.gpio) + "' name='gpio" + String(pin.gpio) + "'>";
+            
+            for (size_t j = 0; j < AVAILABLE_PIN_OPTIONS_COUNT; j++) {
+                const auto& opt = AVAILABLE_PIN_OPTIONS[j];
+                bool isDefault = (String(opt.name) == pin.defaultOption);
+                String selectedAttr = isDefault ? " selected" : "";
+                
+                rows += "<option value='" + String(opt.value) + "'" + selectedAttr + ">" + opt.name + "</option>";
+            }
+            
+            rows += "</select></div>";
+        }
+    }
+    return rows;
+}
+
 /** @brief Renders HTML templates by replacing placeholders. */
 static String renderTemplate(const char* templateStr) {
     String page = String(templateStr);
@@ -61,6 +93,7 @@ static String renderTemplate(const char* templateStr) {
     page.replace("%MAC_ADDR%", String(esp_info_get_mac_str()));
     page.replace("%FLASH_SIZE%", String(ESP.getFlashChipSize() / 1024) + " KB");
     page.replace("%SENSOR_TABLE_ROWS%", tableRowsHTML);
+    page.replace("%GPIO_TABLE_ROWS%", generatePinRows());
     page.replace("%UPTIME%", formatUptime(millis() / 1000));
     page.replace("%IP_ADDR%", WiFi.localIP().toString());
     page.replace("%GATEWAY%", WiFi.gatewayIP().toString());
@@ -377,7 +410,26 @@ static void setupWebServer() {
         vTaskDelay(pdMS_TO_TICKS(2000));
         postIncomingCommand(CMD_RESTART);
     });
+    // Endpoint: Save GPIO Pin Configuration
+    server->on("/saveModule", HTTP_POST, [](AsyncWebServerRequest *request) {
+        if (!request->authenticate(getWebUsername().c_str(), getWebPassword().c_str())) {
+            return request->requestAuthentication();
+        }
 
+        for (int i = 0; i < MAX_GPIO_PINS; i++) {
+            String paramName = "gpio" + String(i);
+            // Check if the parameter exists in the request and update the pin name accordingly
+            if (request->hasParam(paramName, true)) {
+                set_pin_name(i, request->getParam(paramName, true)->value());
+            }
+        }
+
+        pin_config_save();
+
+        request->send(200, "text/plain", "OK");
+        vTaskDelay(pdMS_TO_TICKS(1000));
+        ESP.restart();
+    });
 
     // Endpoint: OTA Firmware Upload Handler
     server->on("/doUpdate", HTTP_POST,

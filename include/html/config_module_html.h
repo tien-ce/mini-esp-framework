@@ -55,62 +55,7 @@ hr.box-divider{border:0;border-top:1px solid #555;margin:10px 0;}
 
 <hr class='box-divider'>
 
-<div class='form-row'>
-  <label for='gpio0'>GPIO0</label>
-  <select id='gpio0' name='gpio0'><option value='0' selected>User</option></select>
-</div>
-<div class='form-row'>
-  <label for='gpio1'>GPIO1</label>
-  <select id='gpio1' name='gpio1'><option value='0' selected>User</option></select>
-</div>
-<div class='form-row'>
-  <label for='gpio2'>GPIO2</label>
-  <select id='gpio2' name='gpio2'><option value='0' selected>User</option></select>
-</div>
-<div class='form-row'>
-  <label for='gpio3'>GPIO3</label>
-  <select id='gpio3' name='gpio3'><option value='0' selected>User</option></select>
-</div>
-<div class='form-row'>
-  <label for='gpio4'>GPIO4</label>
-  <select id='gpio4' name='gpio4'><option value='0' selected>User</option></select>
-</div>
-<div class='form-row'>
-  <label for='gpio5'>GPIO5</label>
-  <select id='gpio5' name='gpio5'><option value='0' selected>User</option></select>
-</div>
-<div class='form-row'>
-  <label for='gpio9' class='gpio-red'>GPIO9</label>
-  <select id='gpio9' name='gpio9'><option value='0' selected>User</option></select>
-</div>
-<div class='form-row'>
-  <label for='gpio10' class='gpio-red'>GPIO10</label>
-  <select id='gpio10' name='gpio10'><option value='0' selected>User</option></select>
-</div>
-<div class='form-row'>
-  <label for='gpio12'>GPIO12</label>
-  <select id='gpio12' name='gpio12'><option value='0' selected>User</option></select>
-</div>
-<div class='form-row'>
-  <label for='gpio13'>GPIO13</label>
-  <select id='gpio13' name='gpio13'><option value='0' selected>User</option></select>
-</div>
-<div class='form-row'>
-  <label for='gpio14'>GPIO14</label>
-  <select id='gpio14' name='gpio14'><option value='0' selected>User</option></select>
-</div>
-<div class='form-row'>
-  <label for='gpio15'>GPIO15</label>
-  <select id='gpio15' name='gpio15'><option value='0' selected>User</option></select>
-</div>
-<div class='form-row'>
-  <label for='gpio16'>GPIO16</label>
-  <select id='gpio16' name='gpio16'><option value='0' selected>User</option></select>
-</div>
-<div class='form-row'>
-  <label for='gpio17'>GPIO17</label>
-  <select id='gpio17' name='gpio17'><option value='0' selected>User</option></select>
-</div>
+%GPIO_TABLE_ROWS%
 
 <button type='submit' class='btn-green'>Save</button>
 </fieldset>
