@@ -38,56 +38,28 @@ a{text-decoration:none;}
 <tr><td class='k'>Program Version</td><td class='v'>%APP_VERSION%</td></tr>
 <tr><td class='k'>Build Date & Time</td><td class='v'>%BUILD_DATE%</td></tr>
 <tr><td class='k'>Core/SDK Version</td><td class='v'>%SDK_VERSION%</td></tr>
-<tr><td class='k'>Uptime</td><td class='v'><span id='infoUptime'>-</span></td></tr>
+<tr><td class='k'>Uptime</td><td class='v'>%UPTIME%</td></tr>
 </table>
 <hr>
 <table class='info-table'>
 <tr><td class='k'>Hostname</td><td class='v'>%HOSTNAME%</td></tr>
 <tr><td class='k'>MAC Address</td><td class='v'>%MAC_ADDR%</td></tr>
-<tr><td class='k'>IP Address (WiFi)</td><td class='v'><span id='infoIp'>-</span></td></tr>
-<tr><td class='k'>Gateway</td><td class='v'><span id='infoGw'>-</span></td></tr>
-<tr><td class='k'>Subnet Mask</td><td class='v'><span id='infoMask'>-</span></td></tr>
-<tr><td class='k'>DNS Server1</td><td class='v'><span id='infoDns'>-</span></td></tr>
+<tr><td class='k'>IP Address (WiFi)</td><td class='v'>%IP_ADDR%</td></tr>
+<tr><td class='k'>Gateway</td><td class='v'>%GATEWAY%</td></tr>
+<tr><td class='k'>Subnet Mask</td><td class='v'>%SUBNET_MASK%</td></tr>
+<tr><td class='k'>DNS Server1</td><td class='v'>%DNS_SERVER%</td></tr>
 </table>
 <hr>
 <table class='info-table'>
 <tr><td class='k'>ESP Chip Id</td><td class='v'>%CHIP_MODEL%</td></tr>
 <tr><td class='k'>Flash Size</td><td class='v'>%FLASH_SIZE%</td></tr>
-<tr><td class='k'>Free Memory</td><td class='v'><span id='infoRam'>-</span></td></tr>
+<tr><td class='k'>Free Memory</td><td class='v'>%FREE_RAM%</td></tr>
 </table>
 
 <a href='/'><button>Main Menu</button></a>
 
 <div class='footer-text' id='footerText'>%FOOTER_TEXT%</div>
 </div>
-
-<script>
-function formatUptime(seconds){
-  let days = Math.floor(seconds / 86400);
-  seconds %= 86400;
-  let hrs = String(Math.floor(seconds / 3600)).padStart(2, '0');
-  seconds %= 3600;
-  let mins = String(Math.floor(seconds / 60)).padStart(2, '0');
-  let secs = String(seconds % 60).padStart(2, '0');
-  return `${days}T${hrs}:${mins}:${secs}`;
-}
-
-function updateDynamicInfo() {
-  fetch('/stats')
-    .then(r => r.json())
-    .then(d => {
-      if (d.uptime !== undefined) document.getElementById('infoUptime').textContent = formatUptime(d.uptime);
-      if (d.freeHeap !== undefined) document.getElementById('infoRam').textContent = (d.freeHeap / 1024).toFixed(1) + ' KB';
-      if (d.ip !== undefined) document.getElementById('infoIp').textContent = d.ip;
-      if (d.gw !== undefined) document.getElementById('infoGw').textContent = d.gw;
-      if (d.mask !== undefined) document.getElementById('infoMask').textContent = d.mask;
-      if (d.dns1 !== undefined) document.getElementById('infoDns').textContent = d.dns1;
-    })
-    .catch(e => console.log(e));
-}
-
-updateDynamicInfo();
-</script>
 </body>
 </html>
 )rawliteral";

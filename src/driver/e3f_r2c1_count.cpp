@@ -23,6 +23,7 @@ static SemaphoreHandle_t configMutex = NULL;
 // Sensor Driver Configuration
 static String sensor_client_id = "";
 static String sensor_api_url = "";
+static uint8_t html_id = 0;
 
 // Read operation: No mutex used
 static int getSensorCount() {
@@ -69,14 +70,13 @@ void saveSensorConfig() {
 void loadSensorConfig() {
     initSensorMutex();
     register_config_file("sensor_driver", "sensor_config.txt");
-
     String raw = read_config("sensor_driver");
     
     if (raw.length() == 0) {
         LOG_INFO("Sensor config file not found or empty. Creating default sensor_config.txt");
         if (configMutex != NULL && xSemaphoreTake(configMutex, portMAX_DELAY) == pdTRUE) {
-            sensor_client_id = ANDON_CLIENT_ID;
-            sensor_api_url = HTTP_URL;
+            sensor_client_id = E3FR2C1_COUNT_CLIENT_ID;
+            sensor_api_url = E3FR2C1_COUNT_API_URL;
             xSemaphoreGive(configMutex);
         }
         saveSensorConfig();
@@ -148,7 +148,8 @@ void vSensorTask(void *pvParameters) {
     bool senHigh = false;
     TickType_t xLastWakeTime = xTaskGetTickCount();
     const TickType_t xFrequency = pdMS_TO_TICKS(10); // Poll every 10 ms
-
+    html_id = registerElement("Sensor count", "", "0");
+    LOG_DEBUG("Registered sensor element with ID: " + String(html_id));
     for (;;) {
         int sensorOutput = digitalRead(IN_1);
 
@@ -161,7 +162,7 @@ void vSensorTask(void *pvParameters) {
                 int currentCount = getSensorCount();
 
                 LOG("Sensor edge detected | Count: " + String(currentCount));
-
+                updateElementValue(html_id,String(currentCount));
                 // Post event to Queue for Network Task (non-blocking if queue full)
                 if (sensorQueue != NULL) {
                     xQueueSend(sensorQueue, &currentCount, 0);

@@ -9,6 +9,8 @@
 #include "html/tools_html.h"
 #include "html/console_html.h"
 #include "html/ota_html.h"
+#include "html/config_html.h"
+#include "html/config_module_html.h"
 
 #include <Arduino.h>
 #include <WiFi.h>
@@ -17,12 +19,14 @@
 static uint16_t web_port      = 0;
 static String web_username    = "";
 static String web_password    = "";
-
 static AsyncWebServer *server= NULL;
-AsyncWebSocket ws("/ws");
-
 static SemaphoreHandle_t webConfigMutex = NULL;
-
+/* For register rows in table*/
+static String tableRowsHTML="";
+static String jsonBuffer = "";
+static uint32_t nextID = 1;
+AsyncWebSocket ws("/ws");
+AsyncWebSocket wsHome("/ws-home");
 /**
  * @brief Initializes the FreeRTOS mutex for protecting Web server->configuration.
  * @param None
@@ -34,6 +38,18 @@ static void initWebMutex() {
     }
 }
 
+static String formatUptime(uint32_t seconds) {
+    uint32_t days = seconds / 86400;
+    seconds %= 86400;
+    uint32_t hrs = seconds / 3600;
+    seconds %= 3600;
+    uint32_t mins = seconds / 60;
+    uint32_t secs = seconds % 60;
+    char buf[32];
+    snprintf(buf, sizeof(buf), "%uT%02u:%02u:%02u", days, hrs, mins, secs);
+    return String(buf);
+}
+
 /**
  * @brief Renders HTML templates by manually replacing placeholders.
  * Avoids ESPAsyncWebServer parser crashes caused by literal '%' in CSS/JS.
@@ -43,7 +59,6 @@ static void initWebMutex() {
  */
 static String renderTemplate(const char* templateStr) {
     String page = String(templateStr);
-    
     page.replace("%HEADER_TITLE%", "ESP32S3");
     page.replace("%HEADER_SUBTITLE%", "ESP mini framework " + String(FIRMWARE_VERSION));
     page.replace("%FOOTER_TEXT%", "ESP mini framework " + String(FIRMWARE_VERSION) + " by Văn Tiến");
@@ -54,8 +69,104 @@ static String renderTemplate(const char* templateStr) {
     page.replace("%CHIP_MODEL%", String(esp_info_get_model()));
     page.replace("%MAC_ADDR%", String(esp_info_get_mac_str()));
     page.replace("%FLASH_SIZE%", String(ESP.getFlashChipSize() / 1024) + " KB");
-
+    page.replace("%SENSOR_TABLE_ROWS%", tableRowsHTML);
+    page.replace("%UPTIME%", formatUptime(millis() / 1000));
+    page.replace("%IP_ADDR%", WiFi.localIP().toString());
+    page.replace("%GATEWAY%", WiFi.gatewayIP().toString());
+    page.replace("%SUBNET_MASK%", WiFi.subnetMask().toString());
+    page.replace("%DNS_SERVER%", WiFi.dnsIP().toString());
+    page.replace("%FREE_RAM%", String(ESP.getFreeHeap() / 1024.0, 1) + " KB");
     return page;
+}
+
+/**
+ * @brief AsyncWebSocket event handler for client connect, disconnect, and incoming data frames.
+ * @param server Pointer to AsyncWebSocket instance.
+ * @param client Pointer to AsyncWebSocketClient instance triggering the event.
+ * @param type Event type identifier (e.g. WS_EVT_CONNECT, WS_EVT_DATA).
+ * @param arg Pointer to event argument payload.
+ * @param data Pointer to raw byte data array.
+ * @param len Byte length of data buffer.
+ * @return None
+ */
+static void onWsEvent(AsyncWebSocket *server, AsyncWebSocketClient *client, AwsEventType type,
+               void *arg, uint8_t *data, size_t len){
+    if (type == WS_EVT_CONNECT) {
+        Serial.printf("WebSocket client #%u connected\n", client->id());
+        client->text("=== Sensor Monitor Connected ===");
+    } else if (type == WS_EVT_DISCONNECT) {
+        Serial.printf("WebSocket client #%u disconnected\n", client->id());
+    } else if (type == WS_EVT_DATA) {
+        AwsFrameInfo *info = (AwsFrameInfo*)arg;
+        if (info->final && info->index == 0 && info->len == len && info->opcode == WS_TEXT) {
+            String msgStr = "";
+            for (size_t i = 0; i < len; i++) {
+                msgStr += (char)data[i];
+            }
+            msgStr.trim();
+            if (msgStr.length() > 0) {
+                postIncomingCommand(msgStr);
+            }
+        }
+    }
+}
+
+/**
+ * @brief Event handler for the /ws-home WebSocket endpoint.
+ *        Manages connection lifecycle and ignores incoming client data.
+ */
+static void onHomeWsEvent(AsyncWebSocket *server, 
+                   AsyncWebSocketClient *client, 
+                   AwsEventType type, 
+                   void *arg, 
+                   uint8_t *data, 
+                   size_t len) {
+    switch (type) {
+        case WS_EVT_CONNECT:
+            // Client connected to /ws-home endpoint
+            break;
+
+        case WS_EVT_DISCONNECT:
+            // Client disconnected
+            break;
+
+        case WS_EVT_DATA:
+        case WS_EVT_PONG:
+        case WS_EVT_ERROR:
+            // Ignore incoming messages from client
+            break;
+    }
+}
+
+uint8_t registerElement(const String& label, const String& unit, const String& initialValue) {
+    uint8_t assignedId = nextID++;
+    tableRowsHTML += "<tr>";
+    tableRowsHTML += "<td class='label'>" + label + "</td>";
+    tableRowsHTML += "<td class='value'><span id='val-" + String(assignedId) + "'>" + initialValue + "</span> " + unit + "</td>";
+    tableRowsHTML += "</tr>";
+    LOG_DEBUG("tableRowsHTML: " + tableRowsHTML);
+    return assignedId;
+}
+
+/**
+ * @brief Appends an element update payload to a static JSON buffer for batch WebSocket transmission.
+ * 
+ * @param id The unique ID assigned during element registration.
+ * @param newValue The updated value string to push to the client.
+ */
+void updateElementValue(uint8_t id, const String& newValue) {
+    
+    // Format JSON payload: {"id":1,"val":"26.5"}
+    String payload = "{\"id\":" + String(id) + ",\"val\":\"" + newValue + "\"}";
+    
+    if (jsonBuffer.length() == 0) {
+        jsonBuffer = "[" + payload;
+    } else {
+        jsonBuffer += "," + payload;
+    }
+    
+    // Note: When sending, the buffer will be closed with a "]" to form a valid JSON array,
+    // and then cleared for the next batch of updates.
 }
 
 void loadWebConfig() {
@@ -132,30 +243,6 @@ void updateWebConfig(uint16_t port, const String &user, const String &pass) {
     saveWebConfig();
 }
 
-// Web Server & WebSocket Instances
-
-void onWsEvent(AsyncWebSocket *server, AsyncWebSocketClient *client, AwsEventType type,
-               void *arg, uint8_t *data, size_t len) {
-    if (type == WS_EVT_CONNECT) {
-        Serial.printf("WebSocket client #%u connected\n", client->id());
-        client->text("=== Sensor Monitor Connected ===");
-    } else if (type == WS_EVT_DISCONNECT) {
-        Serial.printf("WebSocket client #%u disconnected\n", client->id());
-    } else if (type == WS_EVT_DATA) {
-        AwsFrameInfo *info = (AwsFrameInfo*)arg;
-        if (info->final && info->index == 0 && info->len == len && info->opcode == WS_TEXT) {
-            String msgStr = "";
-            for (size_t i = 0; i < len; i++) {
-                msgStr += (char)data[i];
-            }
-            msgStr.trim();
-            if (msgStr.length() > 0) {
-                postIncomingCommand(msgStr, CMD_SOURCE_WEB);
-            }
-        }
-    }
-}
-
 void setupWebServer() {
 	uint16_t port = getWebPort();
 	if (server != NULL) {
@@ -170,7 +257,8 @@ void setupWebServer() {
     ws.setAuthentication(getWebUsername().c_str(), getWebPassword().c_str());
     ws.onEvent(onWsEvent);
     server->addHandler(&ws);
-
+    wsHome.onEvent(onHomeWsEvent);
+    server->addHandler(&wsHome);
     // Page 1: Main Menu UI
     server->on("/", HTTP_GET, [](AsyncWebServerRequest *request) {
         if (!request->authenticate(getWebUsername().c_str(), getWebPassword().c_str())) {
@@ -210,28 +298,27 @@ void setupWebServer() {
         }
         request->send(200, "text/html", renderTemplate(OTA_HTML));
     });
+
+    // Page 6: Configuration UI
+    server->on("/config", HTTP_GET, [](AsyncWebServerRequest *request) {
+        if (!request->authenticate(getWebUsername().c_str(), getWebPassword().c_str())) {
+            return request->requestAuthentication();
+        }
+        request->send(200, "text/html", renderTemplate(CONFIG_HTML));
+    });
+
+    // Page 7: Configuration Module UI
+    server->on("/config-module", HTTP_GET, [](AsyncWebServerRequest *request) {
+        if (!request->authenticate(getWebUsername().c_str(), getWebPassword().c_str())) {
+            return request->requestAuthentication();
+        }
+        request->send(200, "text/html", renderTemplate(CONFIG_MODULE_HTML));
+    });
     
     server->onNotFound([](AsyncWebServerRequest *request) {
         Serial.printf("[Web Error] Not Found / Internal error on URL: %s\n", request->url().c_str());
         request->send(404, "text/plain", "Not found");
     });
-    // Endpoint: Dynamic Telemetry Data Only
-    server->on("/stats", HTTP_GET, [](AsyncWebServerRequest *request) {
-        String json = "{";
-        json += "\"uptime\":" + String(millis() / 1000) + ",";
-        json += "\"freeHeap\":" + String(ESP.getFreeHeap()) + ",";
-        json += "\"rssi\":" + String(WiFi.RSSI()) + ",";
-        json += "\"ip\":\"" + WiFi.localIP().toString() + "\",";
-        json += "\"gw\":\"" + WiFi.gatewayIP().toString() + "\",";
-        json += "\"mask\":\"" + WiFi.subnetMask().toString() + "\",";
-        json += "\"dns1\":\"" + WiFi.dnsIP().toString() + "\"";
-        json += "}";
-
-        AsyncWebServerResponse *response = request->beginResponse(200, "application/json", json);
-        response->addHeader("Access-Control-Allow-Origin", "*");
-        request->send(response);
-    });
-
 
 
     // Endpoint: Retrieve Device Configuration
@@ -283,7 +370,7 @@ void setupWebServer() {
             String cmd = request->getParam("msg")->value();
             cmd.trim();
             if (cmd.length() > 0) {
-                postIncomingCommand(cmd, CMD_SOURCE_WEB);
+                postIncomingCommand(cmd);
             }
 
             request->send(200, "text/plain", "Command queued: " + cmd);
@@ -298,13 +385,9 @@ void setupWebServer() {
             return request->requestAuthentication();
         }
 
-        // Reset wifi and web configs to defaults
-        updateWifiConfig("Juniper_Secured", "vs353535");
-        updateWebConfig(8088, "ittien", "Remtoiyeuemilia1@");
-
         request->send(200, "text/plain", "Configuration reset! Restarting with default settings...");
         vTaskDelay(pdMS_TO_TICKS(2000));
-        ESP.restart();
+        postIncomingCommand(CMD_RESTART);
     });
 
 
@@ -360,7 +443,13 @@ void vWebMonitorTask(void *pvParameters) {
     setupWebServer();
     for (;;) {
         ws.cleanupClients();
-        vTaskDelay(pdMS_TO_TICKS(1000));
+        wsHome.cleanupClients();
+        if (jsonBuffer.length() > 0) {
+            String payload = jsonBuffer + "]";
+            wsHome.textAll(payload);
+            jsonBuffer = ""; // Reset buffer
+        }
+        vTaskDelay(pdMS_TO_TICKS(5000));
     }
 }
 
