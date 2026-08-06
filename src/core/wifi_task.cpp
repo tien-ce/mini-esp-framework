@@ -23,6 +23,9 @@ static void initWifiMutex() {
     }
 }
 
+/**
+ * @brief Saves WiFi configuration settings to LittleFS.
+ */
 static void saveWifiConfig() {
     String content = "";
     if (wifiConfigMutex != NULL && xSemaphoreTake(wifiConfigMutex, portMAX_DELAY) == pdTRUE) {
@@ -33,7 +36,10 @@ static void saveWifiConfig() {
     save_config("wifi", content);
 }
 
-void loadWifiConfig() {
+/**
+ * @brief Loads WiFi module configuration from LittleFS.
+ */
+static void loadWifiConfig() {
     initWifiMutex();
     register_config_file("wifi", "wifi_config.txt");
     /* Init and save config */
@@ -141,12 +147,18 @@ static void diagnose_connection_issues(IPAddress targetIP) {
     LOG_INFO("-----------------------------------");
 }
 
-void WiFiStationDisconnected(WiFiEvent_t event, WiFiEventInfo_t info) {
+/**
+ * @brief WiFi station disconnect event callback handler.
+ */
+static void WiFiStationDisconnected(WiFiEvent_t event, WiFiEventInfo_t info) {
     CoreState_SetNetwork(NET_STATE_DISCONNECTED);
     LOG_WARNING("WiFi disconnected! Reason: " + String(info.wifi_sta_disconnected.reason));
 }
 
-void setup_wifi() {
+/**
+ * @brief Configures WiFi hardware mode, static IP, events, and initiates connection.
+ */
+static void setup_wifi() {
     /* Update state of network is connecting */
     CoreState_SetNetwork(NET_STATE_CONNECTING);
     WiFi.mode(WIFI_STA);

@@ -9,46 +9,19 @@
 /*                     LITTLEFS GENERIC CONFIG MANAGER API                    */
 /* -------------------------------------------------------------------------- */
 
-/**
- * @brief Initializes LittleFS storage and loads registered file mapping list.
- * Must be called at boot before module registrations or config reads/writes.
- * @param None
- * @return None
- */
-void loadConfig();
+/** @brief Initializes config manager and loads registry list. */
+void config_manager_init();
 
-/**
- * @brief Registers a module name and its associated configuration file name.
- * 
- * Checks module_name and file. If file_name is already registered under a
- * different module_name, registration fails and returns false.
- * 
- * @param module_name Unique identifier for module (e.g. "wifi", "web").
- * @param file_name Configuration filename stored in LittleFS (e.g. "wifi_config.txt").
- * @return true on success, false if file_name is already registered to another module.
- */
+/** @brief Registers module name and associated config file. */
 bool register_config_file(const String &module_name, const String &file_name);
 
-/**
- * @brief Saves configuration content for a registered module to its file in LittleFS.
- * @param module_name Registered module name.
- * @param content Configuration content string to save.
- * @return true on success, false if module is not registered or file error occurs.
- */
+/** @brief Saves configuration content for a registered module. */
 bool save_config(const String &module_name, const String &content);
 
-/**
- * @brief Reads configuration content for a registered module from its LittleFS file.
- * @param module_name Registered module name.
- * @return String content of the file, or "" if not found or unreadable.
- */
+/** @brief Reads configuration content for a registered module. */
 String read_config(const String &module_name);
 
-/**
- * @brief Checks whether a module is currently registered.
- * @param module_name Unique identifier for module to check.
- * @return true if module is registered, false otherwise.
- */
+/** @brief Checks if a module is currently registered. */
 bool is_module_registered(const String &module_name);
 
 #endif // CONFIG_MANAGER_H

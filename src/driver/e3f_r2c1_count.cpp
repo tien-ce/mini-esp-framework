@@ -25,12 +25,16 @@ static String sensor_client_id = "";
 static String sensor_api_url = "";
 static uint8_t html_id = 0;
 
-// Read operation: No mutex used
+/**
+ * @brief Returns current sensor count value.
+ */
 static int getSensorCount() {
     return cnt;
 }
 
-// Write operation: Protected by mutex
+/**
+ * @brief Increments sensor count in a thread-safe manner.
+ */
 static void incrementSensorCount() {
     if (countMutex != NULL && xSemaphoreTake(countMutex, portMAX_DELAY) == pdTRUE) {
         cnt++;
@@ -38,7 +42,9 @@ static void incrementSensorCount() {
     }
 }
 
-// Write operation: Protected by mutex
+/**
+ * @brief Resets sensor count to zero in a thread-safe manner.
+ */
 void resetSensorCount() {
     if (countMutex != NULL && xSemaphoreTake(countMutex, portMAX_DELAY) == pdTRUE) {
         cnt = 0;
@@ -58,7 +64,10 @@ static void initSensorMutex() {
     }
 }
 
-void saveSensorConfig() {
+/**
+ * @brief Saves sensor driver configuration parameters to LittleFS.
+ */
+static void saveSensorConfig() {
     initSensorMutex();
     String content = "";
     // Read local variables to build payload, no lock required for simple string concatenation copy
@@ -67,7 +76,10 @@ void saveSensorConfig() {
     save_config("sensor_driver", content);
 }
 
-void loadSensorConfig() {
+/**
+ * @brief Loads sensor driver configuration parameters from LittleFS.
+ */
+static void loadSensorConfig() {
     initSensorMutex();
     register_config_file("sensor_driver", "sensor_config.txt");
     String raw = read_config("sensor_driver");
@@ -144,7 +156,7 @@ void updateSensorConfig(const String &newClientID, const String &newApiUrl) {
 /**
  * @brief Task 1: Sensor Sampling & Edge Detection Task
  */
-void vSensorTask(void *pvParameters) {
+static void vSensorTask(void *pvParameters) {
     bool senHigh = false;
     TickType_t xLastWakeTime = xTaskGetTickCount();
     const TickType_t xFrequency = pdMS_TO_TICKS(10); // Poll every 10 ms
@@ -180,7 +192,7 @@ void vSensorTask(void *pvParameters) {
 /**
  * @brief Task 2: Network Transmission & HTTP Logging Task
  */
-void vNetworkTask(void *pvParameters) {
+static void vNetworkTask(void *pvParameters) {
     int countVal = 0;
     HTTPClient http;
 

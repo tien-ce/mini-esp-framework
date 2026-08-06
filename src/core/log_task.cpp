@@ -39,12 +39,15 @@ static std::unordered_map<String, CommandHandlerFunc, StringHash> commandMap;
 /* -------------------------------------------------------------------------- */
 /*                            LOCAL HELPER FUNCTIONS                          */
 /* -------------------------------------------------------------------------- */
+/** @brief Command handler: Restarts system. */
+static void esp32_restart(const String &arg) {
+    LOG_INFO("Received restart command, logging and restarting system");
+    LOG_INFO("System restarting........");
+    vTaskDelay(1000);
+    ESP.restart();
+}
 
-/**
- * @brief Helper function to convert LogLevel enum values to string representations.
- * @param level The LogLevel enum value.
- * @return String representation of the log level.
- */
+/** @brief Converts LogLevel enum value to string representation. */
 static String levelToStr(LogLevel level) {
     switch (level) {
         case LOG_LEVEL_DEBUG:   return "LOG_LEVEL_DEBUG";
@@ -55,11 +58,7 @@ static String levelToStr(LogLevel level) {
     }
 }
 
-/**
- * @brief Parses raw command strings into command name and argument, then executes matching registered handler.
- * @param raw_cmd The raw command string received (e.g., "SET_LOG_LEVEL: DEBUG").
- * @return None
- */
+/** @brief Parses raw command string and executes matching registered handler. */
 static void execute_cmd(const String &raw_cmd) {
     LOG_DEBUG("Raw command received: " + raw_cmd);
 
@@ -100,12 +99,8 @@ static void execute_cmd(const String &raw_cmd) {
 /*                          COMMAND HANDLER FUNCTIONS                         */
 /* -------------------------------------------------------------------------- */
 
-/**
- * @brief Command handler: Lists all acceptable parameters for setting log level.
- * @param arg Command argument (unused).
- * @return None
- */
-void listLogLevel(const String &arg) {
+/** @brief Command handler: Lists acceptable parameters for log level. */
+static void listLogLevel(const String &arg) {
     LOG_INFO("Acceptable setLogLevel parameters:");
     LOG_INFO("  0 or DEBUG / LOG_DEBUG / LOG_LEVEL_DEBUG");
     LOG_INFO("  1 or INFO  / LOG_INFO  / LOG_LEVEL_INFO");
@@ -113,12 +108,8 @@ void listLogLevel(const String &arg) {
     LOG_INFO("  3 or ERROR / LOG_ERROR / LOG_LEVEL_ERROR");
 }
 
-/**
- * @brief Command handler: Sets the system current log severity level.
- * @param arg Parameter string representing desired log level (e.g. "DEBUG", "1", "LOG_LEVEL_INFO").
- * @return None
- */
-void setLogLevel(const String &arg) {
+/** @brief Command handler: Sets current log severity level. */
+static void setLogLevel(const String &arg) {
     String cleanArg = arg;
     cleanArg.trim();
     cleanArg.toUpperCase();
@@ -143,12 +134,8 @@ void setLogLevel(const String &arg) {
     LOG_INFO("Set Log Level: " + String(currentLogLevel));
 }
 
-/**
- * @brief Command handler: Prints the current log severity level string.
- * @param arg Command argument (unused).
- * @return None
- */
-void getLogLevel(const String &arg) {
+/** @brief Command handler: Prints current log severity level. */
+static void getLogLevel(const String &arg) {
     LOG_INFO("Current Log Level: " + String(levelToStr(currentLogLevel)));
 }
 
@@ -210,7 +197,7 @@ void logPrint(const String &msg, LogLevel level) {
 /**
  * @brief Initializes Serial interface, sets serial output ready, and registers default log commands.
  */
-void initLogTask() {
+static void initLogTask() {
     if (logMutex == NULL) {
         logMutex = xSemaphoreCreateMutex();
     }
@@ -225,7 +212,7 @@ void initLogTask() {
             if (c == '\n' || c == '\r') {
                 serialBuf.trim();
                 if (serialBuf.length() > 0) {
-                    postIncomingCommand(serialBuf, CMD_SOURCE_SERIAL);
+                    postIncomingCommand(serialBuf);
                     serialBuf = "";
                 }
             } else {
@@ -259,7 +246,7 @@ bool register_cmd(const String &name, CommandHandlerFunc handler) {
 /**
  * @brief Updates system mode to normal to enable Serial log output.
  */
-void setSerialLogReady() {
+static void setSerialLogReady() {
     CoreState_SetMode(MODE_NORMAL);
 }
 
@@ -275,16 +262,12 @@ void setWebLogReady() {
  * @param cmdText Command text string.
  * @param source Origin source (CMD_SOURCE_SERIAL or CMD_SOURCE_WEB).
  */
-void postIncomingCommand(const String &cmdText, CommandSource source) {
+void postIncomingCommand(const String &cmdText) {
     if (commandQueue == NULL) return;
 
     CommandPacket packet;
     memset(&packet, 0, sizeof(packet));
     strncpy(packet.text, cmdText.c_str(), sizeof(packet.text) - 1);
-    packet.source = source;
-
-    String srcStr = (source == CMD_SOURCE_SERIAL) ? "SERIAL" : "WEB";
-    LOG_DEBUG("Enqueueing command from [" + srcStr + "]: '" + cmdText + "' (Length: " + String(cmdText.length()) + ")");
 
     xQueueSend(commandQueue, &packet, 0);
 }
@@ -302,14 +285,14 @@ void vLogTask(void *pvParameters) {
     register_cmd(CMD_SET_LOG_LEVEL, setLogLevel);
     register_cmd(CMD_GET_LOG_LEVEL, getLogLevel);
     register_cmd(CMD_LIST_LOG_LEVEL, listLogLevel);
+    register_cmd(CMD_RESTART, esp32_restart);
     LOG_INFO("vLogTask started, sleeping until command arrives...");
     for (;;) {
         // Sleep indefinitely on commandQueue (0% CPU usage while sleeping)
         if (commandQueue != NULL && xQueueReceive(commandQueue, &packet, portMAX_DELAY) == pdPASS) {
-            String srcStr = (packet.source == CMD_SOURCE_SERIAL) ? "SERIAL" : "WEB";
             String cmdText = String(packet.text);
 
-            LOG_DEBUG("vLogTask woke up! Received command from [" + srcStr + "]: '" + cmdText + "' (Size: " + String(cmdText.length()) + " bytes)");
+            LOG_DEBUG("vLogTask woke up! Received command" + cmdText + "' (Size: " + String(cmdText.length()) + " bytes)");
 
             execute_cmd(cmdText);
         }

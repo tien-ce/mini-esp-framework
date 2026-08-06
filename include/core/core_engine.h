@@ -86,100 +86,43 @@ typedef struct {
 // 3. THREAD-SAFE STATE MATRIX API INTERFACE
 // ============================================================================
 
-/**
- * @brief Thread-safe getter to read the current system state matrix snapshot.
- * @param p_out_state Pointer to structure where state snapshot will be copied.
- * @return None
- */
+/** @brief Reads current system state matrix snapshot. */
 void CoreState_Get(CoreSystemStateMatrix_t* p_out_state);
 
-/**
- * @brief Thread-safe getter for current system mode.
- * @param None
- * @return Current SystemMode_t enum value.
- */
+/** @brief Gets current system mode. */
 SystemMode_t CoreState_GetMode();
 
-/**
- * @brief Thread-safe getter for current network state.
- * @param None
- * @return Current NetworkState_t enum value.
- */
+/** @brief Gets current network state. */
 NetworkState_t CoreState_GetNetwork();
 
-/**
- * @brief Thread-safe getter for current web server state.
- * @param None
- * @return Current WebServerState_t enum value.
- */
+/** @brief Gets current web server state. */
 WebServerState_t CoreState_GetWebServer();
 
-/**
- * @brief Thread-safe getter for current MQTT client state.
- * @param None
- * @return Current MqttState_t enum value.
- */
+/** @brief Gets current MQTT client state. */
 MqttState_t CoreState_GetMqtt();
 
-/**
- * @brief Thread-safe getter for flash storage integrity status.
- * @param None
- * @return true if storage is readable/writable, false on failure.
- */
+/** @brief Gets flash storage health status. */
 bool CoreState_GetStorageStatus();
 
-/**
- * @brief Thread-safe update for System Mode context.
- * @param mode New SystemMode_t enum value.
- * @return None
- */
+/** @brief Sets system mode context. */
 void CoreState_SetMode(SystemMode_t mode);
 
-/**
- * @brief Thread-safe update for Network State.
- * @param state New NetworkState_t enum value.
- * @return None
- */
+/** @brief Sets network state. */
 void CoreState_SetNetwork(NetworkState_t state);
 
-/**
- * @brief Thread-safe update for WebServer State.
- * @param state New WebServerState_t enum value.
- * @return None
- */
+/** @brief Sets web server state. */
 void CoreState_SetWebServer(WebServerState_t state);
 
-/**
- * @brief Thread-safe update for MQTT Client State.
- * @param state New MqttState_t enum value.
- * @return None
- */
+/** @brief Sets MQTT client state. */
 void CoreState_SetMqtt(MqttState_t state);
 
-/**
- * @brief Thread-safe update for Flash Storage health flag.
- * @param is_ok true if storage is readable/writable, false on failure.
- * @return None
- */
+/** @brief Sets flash storage health status. */
 void CoreState_SetStorageStatus(bool is_ok);
 
-/**
- * @brief Blocks calling task until a specific subsystem reaches the expected state.
- * @param type Domain category (SYSTEM_EVENT, NETWORK_EVENT, WEB_EVENT, MQTT_EVENT).
- * @param expected_state Target state casted as uint8_t (e.g., NET_STATE_WIFI_STA).
- * @param timeout_ticks Max FreeRTOS ticks to block (e.g., portMAX_DELAY).
- * @return true if state was reached, false on timeout or invalid parameter.
- */
+/** @brief Blocks calling task until target subsystem state is reached. */
 bool waiting_on_event(Event_t type, uint8_t expected_state, TickType_t timeout_ticks);
 
-/**
- * @brief Bootstrapping entry point for the Core Engine framework.
- * 
- * Loads LittleFS configuration, initializes log queues & mutexes, connects WiFi,
- * configures WebServer REST & WS endpoints, and spawns core system FreeRTOS tasks.
- * @param None
- * @return None
- */
+/** @brief Bootstrapping entry point for Core Engine framework. */
 void CoreEngine_Start();
 
 

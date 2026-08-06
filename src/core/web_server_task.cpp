@@ -27,17 +27,14 @@ static String jsonBuffer = "";
 static uint32_t nextID = 1;
 AsyncWebSocket ws("/ws");
 AsyncWebSocket wsHome("/ws-home");
-/**
- * @brief Initializes the FreeRTOS mutex for protecting Web server->configuration.
- * @param None
- * @return None
- */
+/** @brief Initializes web server mutex. */
 static void initWebMutex() {
     if (webConfigMutex == NULL) {
         webConfigMutex = xSemaphoreCreateMutex();
     }
 }
 
+/** @brief Formats seconds into uptime string format (e.g. "0T00:01:23"). */
 static String formatUptime(uint32_t seconds) {
     uint32_t days = seconds / 86400;
     seconds %= 86400;
@@ -50,13 +47,7 @@ static String formatUptime(uint32_t seconds) {
     return String(buf);
 }
 
-/**
- * @brief Renders HTML templates by manually replacing placeholders.
- * Avoids ESPAsyncWebServer parser crashes caused by literal '%' in CSS/JS.
- * 
- * @param templateStr Raw HTML content from PROGMEM
- * @return String Rendered HTML content
- */
+/** @brief Renders HTML templates by replacing placeholders. */
 static String renderTemplate(const char* templateStr) {
     String page = String(templateStr);
     page.replace("%HEADER_TITLE%", "ESP32S3");
@@ -79,16 +70,7 @@ static String renderTemplate(const char* templateStr) {
     return page;
 }
 
-/**
- * @brief AsyncWebSocket event handler for client connect, disconnect, and incoming data frames.
- * @param server Pointer to AsyncWebSocket instance.
- * @param client Pointer to AsyncWebSocketClient instance triggering the event.
- * @param type Event type identifier (e.g. WS_EVT_CONNECT, WS_EVT_DATA).
- * @param arg Pointer to event argument payload.
- * @param data Pointer to raw byte data array.
- * @param len Byte length of data buffer.
- * @return None
- */
+/** @brief WebSocket event handler for /ws terminal console endpoint. */
 static void onWsEvent(AsyncWebSocket *server, AsyncWebSocketClient *client, AwsEventType type,
                void *arg, uint8_t *data, size_t len){
     if (type == WS_EVT_CONNECT) {
@@ -111,10 +93,7 @@ static void onWsEvent(AsyncWebSocket *server, AsyncWebSocketClient *client, AwsE
     }
 }
 
-/**
- * @brief Event handler for the /ws-home WebSocket endpoint.
- *        Manages connection lifecycle and ignores incoming client data.
- */
+/** @brief WebSocket event handler for /ws-home telemetry endpoint. */
 static void onHomeWsEvent(AsyncWebSocket *server, 
                    AsyncWebSocketClient *client, 
                    AwsEventType type, 
@@ -169,7 +148,10 @@ void updateElementValue(uint8_t id, const String& newValue) {
     // and then cleared for the next batch of updates.
 }
 
-void loadWebConfig() {
+/**
+ * @brief Loads web server configuration from LittleFS web_config.txt file.
+ */
+static void loadWebConfig() {
     register_config_file("web", "web_config.txt");
     initWebMutex();
 
@@ -210,7 +192,10 @@ void loadWebConfig() {
     LOG_INFO("web config loaded successfully.");
 }
 
-void saveWebConfig() {
+/**
+ * @brief Saves current in-memory web server configuration parameters to LittleFS.
+ */
+static void saveWebConfig() {
     String content = "";
     if (webConfigMutex != NULL && xSemaphoreTake(webConfigMutex, portMAX_DELAY) == pdTRUE) {
         content += "port=" + String(web_port) + "\n";
@@ -243,7 +228,10 @@ void updateWebConfig(uint16_t port, const String &user, const String &pass) {
     saveWebConfig();
 }
 
-void setupWebServer() {
+/**
+ * @brief Configures AsyncWebServer endpoints, WebSocket handlers, and authentication.
+ */
+static void setupWebServer() {
 	uint16_t port = getWebPort();
 	if (server != NULL) {
 		LOG_INFO("Cleaning up old server instance...");

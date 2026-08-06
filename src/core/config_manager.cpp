@@ -14,22 +14,14 @@ struct ModuleRegistryEntry {
 static std::vector<ModuleRegistryEntry> g_registry_list;
 static SemaphoreHandle_t configMutex = NULL;
 
-/**
- * @brief Initializes the FreeRTOS mutexes for config and counter protection.
- * @param None
- * @return None
- */
+/** @brief Initializes config mutex. */
 static void initMutexes() {
     if (configMutex == NULL) {
         configMutex = xSemaphoreCreateMutex();
     }
 }
 
-/**
- * @brief Writes the internal module registry list to LittleFS system registry file.
- * @param None
- * @return None
- */
+/** @brief Saves registry list to LittleFS. */
 static void save_registry_list_internal() {
     File f = LittleFS.open(REGISTRY_FILE_PATH, "w");
     if (!f) {
@@ -41,11 +33,7 @@ static void save_registry_list_internal() {
     f.close();
 }
 
-/**
- * @brief Reads the module registry list from LittleFS system registry file into RAM.
- * @param None
- * @return None
- */
+/** @brief Loads registry list from LittleFS. */
 static void load_registry_list_internal() {
     g_registry_list.clear();
     if (!LittleFS.exists(REGISTRY_FILE_PATH)) {

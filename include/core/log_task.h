@@ -46,14 +46,6 @@ enum LogLevel {
 };
 
 /**
- * @brief Identifies the source of incoming commands (Serial or Web).
- */
-enum CommandSource {
-    CMD_SOURCE_SERIAL,
-    CMD_SOURCE_WEB
-};
-
-/**
  * @brief Callback function type for command handlers.
  * @param args Arguments passed along with the command.
  */
@@ -64,72 +56,34 @@ typedef void (*CommandHandlerFunc)(const String &args);
  */
 struct CommandPacket {
     char text[128];
-    CommandSource source;
 };
 
 /* -------------------------------------------------------------------------- */
 /*                            EXTERNAL API FUNCTIONS                          */
 /* -------------------------------------------------------------------------- */
 
-/**
- * @brief Initializes the logging system, Serial interface, and default commands.
- * @param None
- * @return None
- */
-void initLogTask();
-
-/**
- * @brief FreeRTOS Task function for log and command processing.
- * @param pvParameters Pointer to FreeRTOS task parameters.
- * @return None
- */
+/** @brief FreeRTOS task for log and command processing. */
 void vLogTask(void *pvParameters);
 
-/**
- * @brief Thread-safe logging function that outputs messages to Serial and Web sockets.
- * @param msg The message string to log.
- * @param level Log severity level (default: LOG_LEVEL_INFO).
- * @return None
- */
+/** @brief Thread-safe logging function for Serial and Web sockets. */
 void logPrint(const String &msg, LogLevel level = LOG_LEVEL_INFO);
 
-/**
- * @brief Registers a command string and its associated callback handler into the command map.
- * @param name The command identifier name string.
- * @param handler Function pointer callback to execute when the command is received.
- * @return true if successfully registered, false if command already exists.
- */
+/** @brief Registers command string and handler callback. */
 bool register_cmd(const String &name, CommandHandlerFunc handler);
 
-/**
- * @brief Enables Serial log output.
- * @param None
- * @return None
- */
-void setSerialLogReady();
-
-/**
- * @brief Enables Web WebSocket log output.
- * @param None
- * @return None
- */
+/** @brief Enables Web WebSocket log output. */
 void setWebLogReady();
 
-/**
- * @brief Thread-safe function to post incoming command from Serial or Web to vLogTask queue.
- * @param cmdText Command text string.
- * @param source Origin source (CMD_SOURCE_SERIAL or CMD_SOURCE_WEB).
- * @return None
- */
-void postIncomingCommand(const String &cmdText, CommandSource source);
+/** @brief Posts incoming command to vLogTask queue. */
+void postIncomingCommand(const String &cmdText);
 
 /* -------------------------------------------------------------------------- */
 /*                               STRING CONSTANTS                             */
 /* -------------------------------------------------------------------------- */
-#define CMD_SET_LOG_LEVEL   "SET_LOG_LEVEL"
-#define CMD_GET_LOG_LEVEL   "GET_LOG_LEVEL"
-#define CMD_LIST_LOG_LEVEL  "LIST_LOG_LEVEL"
-
+#define CMD_SET_LOG_LEVEL   "CMD_SET_LEVEL"
+#define CMD_GET_LOG_LEVEL   "CMD_GET_LEVEL"
+#define CMD_LIST_LOG_LEVEL  "CMD_LIST_LEVEL"
+#define CMD_RESTART         "ESP32_RESTART"
 #endif // LOG_TASK_H
 
 

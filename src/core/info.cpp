@@ -10,7 +10,10 @@ static esp_device_info_t s_device_info = {
     false
 };
 
-void esp_info_load(void) {
+/**
+ * @brief Initializes and caches hardware static info (Model, MAC).
+ */
+static void esp_info_load(void) {
     if (s_device_info.is_loaded) {
         return;
     }

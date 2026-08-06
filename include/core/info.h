@@ -17,34 +17,19 @@ typedef struct {
     bool is_loaded;
 } esp_device_info_t;
 
-/**
- * @brief Initializes and caches hardware static info (Model, MAC).
- */
-void esp_info_load(void);
-
-/**
- * @brief Gets chip model string (e.g., "ESP32-S3").
- */
+/** @brief Gets chip model string. */
 const char* esp_info_get_model(void);
 
-/**
- * @brief Formats and gets MAC address string ("XX:XX:XX:XX:XX:XX").
- */
+/** @brief Gets formatted MAC address string. */
 const char* esp_info_get_mac_str(void);
 
-/**
- * @brief Gets static firmware version string.
- */
+/** @brief Gets static firmware version string. */
 const char* esp_info_get_fw_version(void);
 
-/**
- * @brief Gets system uptime in seconds (Dynamic).
- */
+/** @brief Gets system uptime in seconds. */
 uint32_t esp_info_get_uptime_sec(void);
 
-/**
- * @brief Gets free heap memory in bytes (Dynamic).
- */
+/** @brief Gets free heap memory in bytes. */
 uint32_t esp_info_get_free_heap(void);
 
 #endif // ESP_INFO_PROVIDER_H

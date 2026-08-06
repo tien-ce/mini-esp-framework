@@ -11,11 +11,7 @@ static CoreSystemStateMatrix_t  g_state_matrix;
 static SemaphoreHandle_t        g_state_mutex = NULL;
 static EventGroupHandle_t       g_state_event_group = NULL;
 
-/**
- * @brief Gets bit offset in event group corresponding to domain event type.
- * @param type Event domain category identifier.
- * @return Bit offset value (0, 4, 8, 12) or 0xFF if invalid.
- */
+/** @brief Gets bit offset in event group for domain event type. */
 static uint8_t GetDomainOffset(Event_t type) {
     switch (type) {
         case SYSTEM_EVENT:  return OFFSET_MODE;
@@ -26,12 +22,7 @@ static uint8_t GetDomainOffset(Event_t type) {
     }
 }
 
-/**
- * @brief Clears and sets event group domain bits atomically to signal state changes.
- * @param type Domain event category identifier.
- * @param new_state New state value enum cast to uint8_t.
- * @return None
- */
+/** @brief Updates domain bits in state event group. */
 static void UpdateDomainBits(Event_t type, uint8_t new_state) {
     uint8_t offset = GetDomainOffset(type);
     if (offset == 0xFF) return;
@@ -43,11 +34,7 @@ static void UpdateDomainBits(Event_t type, uint8_t new_state) {
     xEventGroupSetBits(g_state_event_group, (1 << (offset + new_state)));
 }
 
-/**
- * @brief Initializes FreeRTOS synchronization primitives (mutex and event group) for state matrix.
- * @param None
- * @return true on success, false if memory allocation failed.
- */
+/** @brief Initializes state matrix mutex and event group. */
 static bool CoreState_Init(void) {
     // 1. Allocate FreeRTOS synchronization primitives
     g_state_mutex = xSemaphoreCreateMutex();
@@ -62,7 +49,8 @@ static bool CoreState_Init(void) {
     g_state_matrix.mqtt = MQTT_STATE_DISCONNECTED;
     g_state_matrix.storage_ok = false;
     g_state_matrix.last_update = xTaskGetTickCount();
-    // 3. Immediately broadcast MODE_BOOT state into Event Group
+    // 3. Init config manager (loads registry list from LittleFS) and broadcast MODBE_BOOT event
+    config_manager_init();
     CoreState_SetMode(MODE_BOOT);
     return true;
 }
@@ -188,8 +176,6 @@ void CoreState_SetStorageStatus(bool is_ok) {
 }
 
 void CoreEngine_Start() {
-
-
     // Initialize state mutex & event group FIRST: vLogTask (created below) touches
     // g_state_event_group as soon as it runs, and it can preempt this task the
     // instant it's created (higher priority, same core). If the event group didn't
