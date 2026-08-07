@@ -12,6 +12,16 @@
 #include "html/console_html.h"
 #include "html/ota_html.h"
 
+/* -------------------------------------------------------------------------- */
+/*                              EXTERNAL VARIABLES                            */
+/* -------------------------------------------------------------------------- */
+
+extern AsyncWebSocket ws;
+
+/* -------------------------------------------------------------------------- */
+/*                              PUBLIC FUNCTIONS                              */
+/* -------------------------------------------------------------------------- */
+
 /** @brief Gets web server port. */
 uint16_t getWebPort();
 
@@ -24,8 +34,6 @@ String getWebPassword();
 /** @brief Updates web server configuration settings. */
 void updateWebConfig(uint16_t port, const String &user, const String &pass);
 
-extern AsyncWebSocket ws;
-
 /** @brief FreeRTOS task for web server monitoring and WebSocket cleanup. */
 void vWebMonitorTask(void *pvParameters);
 
@@ -34,6 +42,8 @@ uint8_t registerElement(const String& label, const String& unit, const String& i
 
 /** @brief Pushes dynamic element update to WebSocket clients. */
 void updateElementValue(uint8_t id, const String& newValue);
+
 #endif // WEB_SERVER_TASK_H
+
 
 

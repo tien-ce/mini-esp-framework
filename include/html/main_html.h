@@ -63,11 +63,12 @@ a{text-decoration:none;}
   %SENSOR_TABLE_ROWS%
 </table>
 <a href='/console'><button>Console</button></a>
-<button class='inactive'>Configuration</button>
+<a href='/config'><button>Configuration</button></a>
 <a href='/info'><button>Information</button></a>
 <a href='/ota'><button>Firmware Upgrade</button></a>
 <a href='/tools'><button>Tools</button></a>
-<button class='btn-red inactive'>Restart</button>
+<a href='/resetConfig' onclick="return confirm('Restart ESP32?');"><button class='btn-red'>Restart</button></a>
+
 
 <div class='footer-text' id='footerText'>
     Model: %CHIP_MODEL% | MAC: %MAC_ADDR%<br>

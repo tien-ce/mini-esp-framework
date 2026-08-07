@@ -14,8 +14,16 @@
 #include <Arduino.h>
 #include "core/core_engine.h"
 
-// ==================== ARDUINO INITIALIZATION ====================
+/* -------------------------------------------------------------------------- */
+/*                            FORWARD DECLARATIONS                            */
+/* -------------------------------------------------------------------------- */
+
 extern void initSensorTasks(); // Forward declaration for sensor task initialization
+
+/* -------------------------------------------------------------------------- */
+/*                              PUBLIC FUNCTIONS                              */
+/* -------------------------------------------------------------------------- */
+
 /**
  * @brief Arduino setup entry point. Initializes Core Engine infrastructure and system tasks.
  * @param None
@@ -30,8 +38,6 @@ void setup() {
     Serial.println("=== Initialization Complete & Multitasking System Running ===\n");
 }
 
-// ==================== ARDUINO MAIN LOOP ====================
-
 /**
  * @brief Arduino main loop. Remains idle as tasks are scheduled by FreeRTOS.
  * @param None
@@ -41,4 +47,5 @@ void loop() {
     // Main loop remains idle; work is handled asynchronously by FreeRTOS tasks
     vTaskDelay(pdMS_TO_TICKS(1000));
 }
+
 

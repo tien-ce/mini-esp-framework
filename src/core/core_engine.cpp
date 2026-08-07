@@ -1,4 +1,8 @@
 #include "core/core_engine.h"
+#include "core/pin_config.h"
+/* -------------------------------------------------------------------------- */
+/*                             DEFINES & CONSTANTS                            */
+/* -------------------------------------------------------------------------- */
 
 // Internal Bit Offset Map (4 bits per domain)
 #define OFFSET_MODE      0
@@ -7,9 +11,17 @@
 #define OFFSET_MQTT      12
 #define MASK_DOMAIN_4BIT 0x0F
 
+/* -------------------------------------------------------------------------- */
+/*                              STATIC VARIABLES                              */
+/* -------------------------------------------------------------------------- */
+
 static CoreSystemStateMatrix_t  g_state_matrix;
 static SemaphoreHandle_t        g_state_mutex = NULL;
 static EventGroupHandle_t       g_state_event_group = NULL;
+
+/* -------------------------------------------------------------------------- */
+/*                              STATIC FUNCTIONS                              */
+/* -------------------------------------------------------------------------- */
 
 /** @brief Gets bit offset in event group for domain event type. */
 static uint8_t GetDomainOffset(Event_t type) {
@@ -49,14 +61,20 @@ static bool CoreState_Init(void) {
     g_state_matrix.mqtt = MQTT_STATE_DISCONNECTED;
     g_state_matrix.storage_ok = false;
     g_state_matrix.last_update = xTaskGetTickCount();
-    // 3. Init config manager (loads registry list from LittleFS) and broadcast MODBE_BOOT event
+    // 3. Init config manager (loads registry list from LittleFS) for other modules to use
     config_manager_init();
+    // 4. Init pin config system (loads pin_config.txt from LittleFS)
+    pin_config_init();
+
+    //5 broadcast MODBE_BOOT event
     CoreState_SetMode(MODE_BOOT);
     return true;
 }
 
+/* -------------------------------------------------------------------------- */
+/*                              PUBLIC FUNCTIONS                              */
+/* -------------------------------------------------------------------------- */
 
-/* Public */
 bool waiting_on_event(Event_t type, uint8_t expected_state, TickType_t timeout_ticks) {
     if (g_state_event_group == NULL) return false;
 
@@ -219,4 +237,5 @@ void CoreEngine_Start() {
     
     waiting_on_event(SYSTEM_EVENT, MODE_NORMAL, pdMS_TO_TICKS(5000));
 }
+
 

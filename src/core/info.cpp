@@ -4,11 +4,19 @@
 #include <esp_mac.h>
 #include <stdio.h>
 
+/* -------------------------------------------------------------------------- */
+/*                              STATIC VARIABLES                              */
+/* -------------------------------------------------------------------------- */
+
 static esp_device_info_t s_device_info = {
     "UNKNOWN",
     "00:00:00:00:00:00",
     false
 };
+
+/* -------------------------------------------------------------------------- */
+/*                              STATIC FUNCTIONS                              */
+/* -------------------------------------------------------------------------- */
 
 /**
  * @brief Initializes and caches hardware static info (Model, MAC).
@@ -49,6 +57,10 @@ static void esp_info_load(void) {
 
     s_device_info.is_loaded = true;
 }
+
+/* -------------------------------------------------------------------------- */
+/*                              PUBLIC FUNCTIONS                              */
+/* -------------------------------------------------------------------------- */
 
 const char* esp_info_get_model(void) {
     if (!s_device_info.is_loaded) esp_info_load();

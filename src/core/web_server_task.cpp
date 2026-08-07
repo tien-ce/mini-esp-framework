@@ -17,6 +17,10 @@
 #include <WiFi.h>
 #include <semphr.h>
 
+/* -------------------------------------------------------------------------- */
+/*                              STATIC VARIABLES                              */
+/* -------------------------------------------------------------------------- */
+
 static uint16_t web_port      = 0;
 static String web_username    = "";
 static String web_password    = "";
@@ -26,8 +30,18 @@ static SemaphoreHandle_t webConfigMutex = NULL;
 static String tableRowsHTML="";
 static String jsonBuffer = "";
 static uint32_t nextID = 1;
+
+/* -------------------------------------------------------------------------- */
+/*                              GLOBAL VARIABLES                              */
+/* -------------------------------------------------------------------------- */
+
 AsyncWebSocket ws("/ws");
 AsyncWebSocket wsHome("/ws-home");
+
+/* -------------------------------------------------------------------------- */
+/*                              STATIC FUNCTIONS                              */
+/* -------------------------------------------------------------------------- */
+
 /** @brief Initializes web server mutex. */
 static void initWebMutex() {
     if (webConfigMutex == NULL) {
@@ -53,6 +67,10 @@ static String generatePinRows() {
     String rows = "";
     for (size_t i = 0; i < BOARD_PIN_COUNT; i++) {
         const auto& pin = BOARD_PINS[i];
+        String activeName = get_pin_name(pin.gpio);
+        if (activeName.length() == 0) {
+            activeName = pin.defaultOption;
+        }
         
         if (pin.isFixed) {
             rows += "<div class='form-row'>";
@@ -66,18 +84,20 @@ static String generatePinRows() {
             rows += "<select id='gpio" + String(pin.gpio) + "' name='gpio" + String(pin.gpio) + "'>";
             
             for (size_t j = 0; j < AVAILABLE_PIN_OPTIONS_COUNT; j++) {
-                const auto& opt = AVAILABLE_PIN_OPTIONS[j];
-                bool isDefault = (String(opt.name) == pin.defaultOption);
-                String selectedAttr = isDefault ? " selected" : "";
+                const char* optName = AVAILABLE_PIN_OPTIONS[j];
+                bool isSelected = activeName.equalsIgnoreCase(optName);
+                String selectedAttr = isSelected ? " selected" : "";
                 
-                rows += "<option value='" + String(opt.value) + "'" + selectedAttr + ">" + opt.name + "</option>";
+                rows += "<option value='" + String(optName) + "'" + selectedAttr + ">" + String(optName) + "</option>";
             }
+
             
             rows += "</select></div>";
         }
     }
     return rows;
 }
+
 
 /** @brief Renders HTML templates by replacing placeholders. */
 static String renderTemplate(const char* templateStr) {
@@ -150,35 +170,18 @@ static void onHomeWsEvent(AsyncWebSocket *server,
     }
 }
 
-uint8_t registerElement(const String& label, const String& unit, const String& initialValue) {
-    uint8_t assignedId = nextID++;
-    tableRowsHTML += "<tr>";
-    tableRowsHTML += "<td class='label'>" + label + "</td>";
-    tableRowsHTML += "<td class='value'><span id='val-" + String(assignedId) + "'>" + initialValue + "</span> " + unit + "</td>";
-    tableRowsHTML += "</tr>";
-    LOG_DEBUG("tableRowsHTML: " + tableRowsHTML);
-    return assignedId;
-}
-
 /**
- * @brief Appends an element update payload to a static JSON buffer for batch WebSocket transmission.
- * 
- * @param id The unique ID assigned during element registration.
- * @param newValue The updated value string to push to the client.
+ * @brief Saves current in-memory web server configuration parameters to LittleFS.
  */
-void updateElementValue(uint8_t id, const String& newValue) {
-    
-    // Format JSON payload: {"id":1,"val":"26.5"}
-    String payload = "{\"id\":" + String(id) + ",\"val\":\"" + newValue + "\"}";
-    
-    if (jsonBuffer.length() == 0) {
-        jsonBuffer = "[" + payload;
-    } else {
-        jsonBuffer += "," + payload;
+static void saveWebConfig() {
+    String content = "";
+    if (webConfigMutex != NULL && xSemaphoreTake(webConfigMutex, portMAX_DELAY) == pdTRUE) {
+        content += "port=" + String(web_port) + "\n";
+        content += "username=" + web_username + "\n";
+        content += "password=" + web_password + "\n";
+        xSemaphoreGive(webConfigMutex);
     }
-    
-    // Note: When sending, the buffer will be closed with a "]" to form a valid JSON array,
-    // and then cleared for the next batch of updates.
+    save_config("web", content);
 }
 
 /**
@@ -223,42 +226,6 @@ static void loadWebConfig() {
         }
     }
     LOG_INFO("web config loaded successfully.");
-}
-
-/**
- * @brief Saves current in-memory web server configuration parameters to LittleFS.
- */
-static void saveWebConfig() {
-    String content = "";
-    if (webConfigMutex != NULL && xSemaphoreTake(webConfigMutex, portMAX_DELAY) == pdTRUE) {
-        content += "port=" + String(web_port) + "\n";
-        content += "username=" + web_username + "\n";
-        content += "password=" + web_password + "\n";
-        xSemaphoreGive(webConfigMutex);
-    }
-    save_config("web", content);
-}
-
-uint16_t getWebPort() { 
-    return web_port;
-}
-
-String getWebUsername() {
-    return web_username;
-}
-
-String getWebPassword() {
-    return web_password;
-}
-
-void updateWebConfig(uint16_t port, const String &user, const String &pass) {
-    if (webConfigMutex != NULL && xSemaphoreTake(webConfigMutex, portMAX_DELAY) == pdTRUE) {
-        web_port = port;
-        web_username = user;
-        web_password = pass;
-        xSemaphoreGive(webConfigMutex);
-    }
-    saveWebConfig();
 }
 
 /**
@@ -341,7 +308,6 @@ static void setupWebServer() {
         request->send(404, "text/plain", "Not found");
     });
 
-
     // Endpoint: Retrieve Device Configuration
     server->on("/getConfig", HTTP_GET, [](AsyncWebServerRequest *request) {
         if (!request->authenticate(getWebUsername().c_str(), getWebPassword().c_str())) {
@@ -410,6 +376,7 @@ static void setupWebServer() {
         vTaskDelay(pdMS_TO_TICKS(2000));
         postIncomingCommand(CMD_RESTART);
     });
+
     // Endpoint: Save GPIO Pin Configuration
     server->on("/saveModule", HTTP_POST, [](AsyncWebServerRequest *request) {
         if (!request->authenticate(getWebUsername().c_str(), getWebPassword().c_str())) {
@@ -470,6 +437,63 @@ static void setupWebServer() {
     Serial.println("Open: http://" + WiFi.localIP().toString() + ":" + String(getWebPort()));
 }
 
+/* -------------------------------------------------------------------------- */
+/*                              PUBLIC FUNCTIONS                              */
+/* -------------------------------------------------------------------------- */
+
+uint8_t registerElement(const String& label, const String& unit, const String& initialValue) {
+    uint8_t assignedId = nextID++;
+    tableRowsHTML += "<tr>";
+    tableRowsHTML += "<td class='label'>" + label + "</td>";
+    tableRowsHTML += "<td class='value'><span id='val-" + String(assignedId) + "'>" + initialValue + "</span> " + unit + "</td>";
+    tableRowsHTML += "</tr>";
+    LOG_DEBUG("tableRowsHTML: " + tableRowsHTML);
+    return assignedId;
+}
+
+uint16_t getWebPort() { 
+    return web_port;
+}
+
+String getWebUsername() {
+    return web_username;
+}
+
+String getWebPassword() {
+    return web_password;
+}
+
+void updateWebConfig(uint16_t port, const String &user, const String &pass) {
+    if (webConfigMutex != NULL && xSemaphoreTake(webConfigMutex, portMAX_DELAY) == pdTRUE) {
+        web_port = port;
+        web_username = user;
+        web_password = pass;
+        xSemaphoreGive(webConfigMutex);
+    }
+    saveWebConfig();
+}
+
+/**
+ * @brief Appends an element update payload to a static JSON buffer for batch WebSocket transmission.
+ * 
+ * @param id The unique ID assigned during element registration.
+ * @param newValue The updated value string to push to the client.
+ */
+void updateElementValue(uint8_t id, const String& newValue) {
+    
+    // Format JSON payload: {"id":1,"val":"26.5"}
+    String payload = "{\"id\":" + String(id) + ",\"val\":\"" + newValue + "\"}";
+    
+    if (jsonBuffer.length() == 0) {
+        jsonBuffer = "[" + payload;
+    } else {
+        jsonBuffer += "," + payload;
+    }
+    
+    // Note: When sending, the buffer will be closed with a "]" to form a valid JSON array,
+    // and then cleared for the next batch of updates.
+}
+
 /**
  * @brief Web Server & System Maintenance Task
  * @priority 1 (Low Priority)
@@ -492,4 +516,5 @@ void vWebMonitorTask(void *pvParameters) {
         vTaskDelay(pdMS_TO_TICKS(5000));
     }
 }
+
 

@@ -4,15 +4,31 @@
 #include <semphr.h>
 #include <vector>
 
+/* -------------------------------------------------------------------------- */
+/*                             DEFINES & CONSTANTS                            */
+/* -------------------------------------------------------------------------- */
+
 #define REGISTRY_FILE_PATH "/sys_config_registry.txt"
+
+/* -------------------------------------------------------------------------- */
+/*                            TYPES & STRUCTURES                             */
+/* -------------------------------------------------------------------------- */
 
 struct ModuleRegistryEntry {
     String module_name;
     String file_name;
 };
 
+/* -------------------------------------------------------------------------- */
+/*                              STATIC VARIABLES                              */
+/* -------------------------------------------------------------------------- */
+
 static std::vector<ModuleRegistryEntry> g_registry_list;
 static SemaphoreHandle_t configMutex = NULL;
+
+/* -------------------------------------------------------------------------- */
+/*                              STATIC FUNCTIONS                              */
+/* -------------------------------------------------------------------------- */
 
 /** @brief Initializes config mutex. */
 static void initMutexes() {
@@ -60,6 +76,9 @@ static void load_registry_list_internal() {
     f.close();
 }
 
+/* -------------------------------------------------------------------------- */
+/*                              PUBLIC FUNCTIONS                              */
+/* -------------------------------------------------------------------------- */
 
 void config_manager_init() {
     initMutexes();
@@ -185,3 +204,4 @@ bool is_module_registered(const String &module_name) {
     }
     return registered;
 }
+

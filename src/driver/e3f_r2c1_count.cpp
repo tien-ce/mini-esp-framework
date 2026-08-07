@@ -2,13 +2,22 @@
 #ifdef USE_E3FR2C1_COUNT
 #include "core/wifi_task.h"
 #include "core/core_engine.h"
+#include "core/pin_config.h"
 #include <HTTPClient.h>
 #include "Header_sensor.h"
 #include <esp_task_wdt.h>
 #include <semphr.h>
 
+/* -------------------------------------------------------------------------- */
+/*                              GLOBAL VARIABLES                              */
+/* -------------------------------------------------------------------------- */
+
 // FreeRTOS Inter-Task Queue Handle
 QueueHandle_t sensorQueue = NULL;
+
+/* -------------------------------------------------------------------------- */
+/*                              STATIC VARIABLES                              */
+/* -------------------------------------------------------------------------- */
 
 // HTTP Cooldown Parameters
 static unsigned long lastHttpFail = 0;
@@ -25,6 +34,30 @@ static String sensor_client_id = "";
 static String sensor_api_url = "";
 static uint8_t html_id = 0;
 
+/* -------------------------------------------------------------------------- */
+/*                              STATIC FUNCTIONS                              */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * @brief Resets sensor count to zero in a thread-safe manner.
+ */
+static void resetSensorCount() {
+    if (countMutex != NULL && xSemaphoreTake(countMutex, portMAX_DELAY) == pdTRUE) {
+        cnt = 0;
+        xSemaphoreGive(countMutex);
+    }
+}
+
+// Read operation: No mutex used
+static String getSensorClientID() {
+    return sensor_client_id;
+}
+
+// Read operation: No mutex used
+static String getSensorApiUrl() {
+    return sensor_api_url;
+}
+
 /**
  * @brief Returns current sensor count value.
  */
@@ -38,16 +71,6 @@ static int getSensorCount() {
 static void incrementSensorCount() {
     if (countMutex != NULL && xSemaphoreTake(countMutex, portMAX_DELAY) == pdTRUE) {
         cnt++;
-        xSemaphoreGive(countMutex);
-    }
-}
-
-/**
- * @brief Resets sensor count to zero in a thread-safe manner.
- */
-void resetSensorCount() {
-    if (countMutex != NULL && xSemaphoreTake(countMutex, portMAX_DELAY) == pdTRUE) {
-        cnt = 0;
         xSemaphoreGive(countMutex);
     }
 }
@@ -132,38 +155,44 @@ static void loadSensorConfig() {
     LOG_INFO("Sensor config loaded successfully.");
 }
 
-// Read operation: No mutex used
-String getSensorClientID() {
-    return sensor_client_id;
-}
-
-// Read operation: No mutex used
-String getSensorApiUrl() {
-    return sensor_api_url;
-}
-
-// Write operation: Protected by mutex
-void updateSensorConfig(const String &newClientID, const String &newApiUrl) {
-    initSensorMutex();
-    if (configMutex != NULL && xSemaphoreTake(configMutex, portMAX_DELAY) == pdTRUE) {
-        sensor_client_id = newClientID;
-        sensor_api_url = newApiUrl;
-        xSemaphoreGive(configMutex);
-    }
-    saveSensorConfig();
-}
-
 /**
  * @brief Task 1: Sensor Sampling & Edge Detection Task
  */
 static void vSensorTask(void *pvParameters) {
+    // Check if the pin name is assigned
+    if (!is_use_name("E3FR2C1_IN")) {
+        LOG_INFO("E3FR2C1_IN pin is not configured. Aborting task.");
+        vTaskDelete(NULL);
+        return;
+    }
+
+    // Resolve GPIO number associated with "E3FR2C1_IN"
+    int8_t e3f_pin = GPIO_INVALID;
+    for (int i = 0; i < MAX_GPIO_PINS; i++) {
+        if (get_pin_name(i).equalsIgnoreCase("E3FR2C1_IN")) {
+            e3f_pin = i;
+            break;
+        }
+    }
+
+    if (e3f_pin == GPIO_INVALID) {
+        LOG_ERROR("Failed to resolve GPIO for E3FR2C1_IN.");
+        vTaskDelete(NULL);
+        return;
+    }
+
+    LOG_INFO("E3FR2C1_IN initialized on GPIO " + String(e3f_pin));
+    pinMode(e3f_pin, INPUT);
+
     bool senHigh = false;
     TickType_t xLastWakeTime = xTaskGetTickCount();
     const TickType_t xFrequency = pdMS_TO_TICKS(10); // Poll every 10 ms
+    
     html_id = registerElement("Sensor count", "", "0");
     LOG_DEBUG("Registered sensor element with ID: " + String(html_id));
+
     for (;;) {
-        int sensorOutput = digitalRead(IN_1);
+        int sensorOutput = digitalRead(e3f_pin);
 
         if (sensorOutput == HIGH) {
             if (!senHigh) {
@@ -173,8 +202,9 @@ static void vSensorTask(void *pvParameters) {
                 incrementSensorCount();
                 int currentCount = getSensorCount();
 
-                LOG("Sensor edge detected | Count: " + String(currentCount));
-                updateElementValue(html_id,String(currentCount));
+                LOG_DEBUG("Sensor edge detected on GPIO " + String(e3f_pin) + " | Count: " + String(currentCount));
+                updateElementValue(html_id, String(currentCount));
+
                 // Post event to Queue for Network Task (non-blocking if queue full)
                 if (sensorQueue != NULL) {
                     xQueueSend(sensorQueue, &currentCount, 0);
@@ -239,6 +269,21 @@ static void vNetworkTask(void *pvParameters) {
     }
 }
 
+/* -------------------------------------------------------------------------- */
+/*                              PUBLIC FUNCTIONS                              */
+/* -------------------------------------------------------------------------- */
+
+// Write operation: Protected by mutex
+void updateSensorConfig(const String &newClientID, const String &newApiUrl) {
+    initSensorMutex();
+    if (configMutex != NULL && xSemaphoreTake(configMutex, portMAX_DELAY) == pdTRUE) {
+        sensor_client_id = newClientID;
+        sensor_api_url = newApiUrl;
+        xSemaphoreGive(configMutex);
+    }
+    saveSensorConfig();
+}
+
 /**
  * @brief Initialization function for Application Sensor Tasks.
  */
@@ -270,3 +315,4 @@ void initSensorTasks() {
 }
 
 #endif // USE_E3FR2C1_COUNT
+

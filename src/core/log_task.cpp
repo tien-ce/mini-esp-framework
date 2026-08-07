@@ -4,9 +4,14 @@
 #include <Arduino.h>
 #include <unordered_map>
 
-#define SERIAL_BAUDRATE    9600 
 /* -------------------------------------------------------------------------- */
-/*                            STRUCTS & HASH HELPERS                          */
+/*                             DEFINES & CONSTANTS                            */
+/* -------------------------------------------------------------------------- */
+
+#define SERIAL_BAUDRATE    115200 
+
+/* -------------------------------------------------------------------------- */
+/*                            TYPES & STRUCTURES                             */
 /* -------------------------------------------------------------------------- */
 
 /**
@@ -22,7 +27,7 @@ struct StringHash {
 };
 
 /* -------------------------------------------------------------------------- */
-/*                               LOCAL VARIABLES                              */
+/*                              STATIC VARIABLES                              */
 /* -------------------------------------------------------------------------- */
 
 static LogLevel currentLogLevel = LOG_LEVEL_DEBUG;
@@ -37,8 +42,9 @@ static QueueHandle_t commandQueue = NULL;
 static std::unordered_map<String, CommandHandlerFunc, StringHash> commandMap;
 
 /* -------------------------------------------------------------------------- */
-/*                            LOCAL HELPER FUNCTIONS                          */
+/*                              STATIC FUNCTIONS                              */
 /* -------------------------------------------------------------------------- */
+
 /** @brief Command handler: Restarts system. */
 static void esp32_restart(const String &arg) {
     LOG_INFO("Received restart command, logging and restarting system");
@@ -95,10 +101,6 @@ static void execute_cmd(const String &raw_cmd) {
     }
 }
 
-/* -------------------------------------------------------------------------- */
-/*                          COMMAND HANDLER FUNCTIONS                         */
-/* -------------------------------------------------------------------------- */
-
 /** @brief Command handler: Lists acceptable parameters for log level. */
 static void listLogLevel(const String &arg) {
     LOG_INFO("Acceptable setLogLevel parameters:");
@@ -139,9 +141,65 @@ static void getLogLevel(const String &arg) {
     LOG_INFO("Current Log Level: " + String(levelToStr(currentLogLevel)));
 }
 
+#if !(defined(ARDUINO_USB_CDC_ON_BOOT) && (ARDUINO_USB_CDC_ON_BOOT > 0))
+/** @brief Polls HardwareSerial RX buffer for standard UART interfaces. */
+static void processHardwareSerialInput() {
+    static String serialBuf = "";
+    while (Serial.available()) {
+        char c = (char)Serial.read();
+        if (c == '\n' || c == '\r') {
+            serialBuf.trim();
+            if (serialBuf.length() > 0) {
+                postIncomingCommand(serialBuf);
+                serialBuf = "";
+            }
+        } else {
+            serialBuf += c;
+        }
+    }
+}
+#endif
+
+/**
+ * @brief Initializes Serial interface, sets serial output ready, and registers default log commands.
+ */
+static void initLogTask() {
+    if (logMutex == NULL) {
+        logMutex = xSemaphoreCreateMutex();
+    }
+    if (commandQueue == NULL) {
+        commandQueue = xQueueCreate(10, sizeof(CommandPacket));
+    }
+    Serial.begin(SERIAL_BAUDRATE);
+
+#if defined(ARDUINO_USB_CDC_ON_BOOT) && (ARDUINO_USB_CDC_ON_BOOT > 0)
+    Serial.onEvent(ARDUINO_HW_CDC_RX_EVENT, [](void* arg, esp_event_base_t base, int32_t id, void* data) {
+        static String serialBuf = "";
+        while (Serial.available()) {
+            char c = (char)Serial.read();
+            if (c == '\n' || c == '\r') {
+                serialBuf.trim();
+                if (serialBuf.length() > 0) {
+                    postIncomingCommand(serialBuf);
+                    serialBuf = "";
+                }
+            } else {
+                serialBuf += c;
+            }
+        }
+    });
+#endif
+}
+
+/**
+ * @brief Updates system mode to normal to enable Serial log output.
+ */
+static void setSerialLogReady() {
+    CoreState_SetMode(MODE_NORMAL);
+}
 
 /* -------------------------------------------------------------------------- */
-/*                            GLOBAL API FUNCTIONS                            */
+/*                              PUBLIC FUNCTIONS                              */
 /* -------------------------------------------------------------------------- */
 
 /**
@@ -195,35 +253,6 @@ void logPrint(const String &msg, LogLevel level) {
 }
 
 /**
- * @brief Initializes Serial interface, sets serial output ready, and registers default log commands.
- */
-static void initLogTask() {
-    if (logMutex == NULL) {
-        logMutex = xSemaphoreCreateMutex();
-    }
-    if (commandQueue == NULL) {
-        commandQueue = xQueueCreate(10, sizeof(CommandPacket));
-    }
-    Serial.begin(SERIAL_BAUDRATE);
-    Serial.onEvent(ARDUINO_HW_CDC_RX_EVENT, [](void* arg, esp_event_base_t base, int32_t id, void* data) {
-        static String serialBuf = "";
-        while (Serial.available()) {
-            char c = (char)Serial.read();
-            if (c == '\n' || c == '\r') {
-                serialBuf.trim();
-                if (serialBuf.length() > 0) {
-                    postIncomingCommand(serialBuf);
-                    serialBuf = "";
-                }
-            } else {
-                serialBuf += c;
-            }
-        }
-    });
-}
-
-
-/**
  * @brief Registers a command string and its handler function into the command map.
  * @param name The command identifier name string.
  * @param handler Function pointer callback to execute when the command is received.
@@ -244,13 +273,6 @@ bool register_cmd(const String &name, CommandHandlerFunc handler) {
 }
 
 /**
- * @brief Updates system mode to normal to enable Serial log output.
- */
-static void setSerialLogReady() {
-    CoreState_SetMode(MODE_NORMAL);
-}
-
-/**
  * @brief Updates WebServer state to listening to enable Web WebSocket log output.
  */
 void setWebLogReady() {
@@ -260,7 +282,6 @@ void setWebLogReady() {
 /**
  * @brief Thread-safe function to post incoming command from Serial or Web to vLogTask queue.
  * @param cmdText Command text string.
- * @param source Origin source (CMD_SOURCE_SERIAL or CMD_SOURCE_WEB).
  */
 void postIncomingCommand(const String &cmdText) {
     if (commandQueue == NULL) return;
@@ -288,13 +309,22 @@ void vLogTask(void *pvParameters) {
     register_cmd(CMD_RESTART, esp32_restart);
     LOG_INFO("vLogTask started, sleeping until command arrives...");
     for (;;) {
-        // Sleep indefinitely on commandQueue (0% CPU usage while sleeping)
-        if (commandQueue != NULL && xQueueReceive(commandQueue, &packet, portMAX_DELAY) == pdPASS) {
+#if !(defined(ARDUINO_USB_CDC_ON_BOOT) && (ARDUINO_USB_CDC_ON_BOOT > 0))
+        processHardwareSerialInput();
+        TickType_t waitTicks = pdMS_TO_TICKS(50);
+#else
+        TickType_t waitTicks = portMAX_DELAY;
+#endif
+
+        // Sleep on commandQueue (event driven for USB CDC, 50ms polling for HardwareSerial)
+        if (commandQueue != NULL && xQueueReceive(commandQueue, &packet, waitTicks) == pdPASS) {
             String cmdText = String(packet.text);
 
-            LOG_DEBUG("vLogTask woke up! Received command" + cmdText + "' (Size: " + String(cmdText.length()) + " bytes)");
+            LOG_DEBUG("vLogTask woke up! Received command: '" + cmdText + "' (Size: " + String(cmdText.length()) + " bytes)");
 
             execute_cmd(cmdText);
         }
     }
 }
+
+

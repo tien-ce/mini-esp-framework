@@ -5,12 +5,20 @@
 #include <ESP32Ping.h>
 #include <semphr.h>
 
+/* -------------------------------------------------------------------------- */
+/*                              STATIC VARIABLES                              */
+/* -------------------------------------------------------------------------- */
+
 static String wifi_ssid     = "";
 static String wifi_password = "";
 
 static SemaphoreHandle_t wifiConfigMutex = NULL;
 static unsigned long previousWifiMillis = 0;
 static const unsigned long wifiReconnectInterval = 30000;
+
+/* -------------------------------------------------------------------------- */
+/*                              STATIC FUNCTIONS                              */
+/* -------------------------------------------------------------------------- */
 
 /**
  * @brief Initializes the FreeRTOS mutex for protecting WiFi task configuration.
@@ -74,42 +82,6 @@ static void loadWifiConfig() {
 		}
 	}
     LOG_INFO("WiFi config loaded successfully.");
-}
-
-String getWifiSSID() {
-    String val = "";
-	val = wifi_ssid;
-    return val;
-}
-
-String getWifiPassword() {
-    String val = "";
-	val = wifi_password;
-    return val;
-}
-
-void updateWifiConfig(const String &newSsid, const String &newPass) {
-    if (wifiConfigMutex != NULL && xSemaphoreTake(wifiConfigMutex, portMAX_DELAY) == pdTRUE) {
-		String content = "";
-        wifi_ssid = newSsid;
-        wifi_password = newPass;
-		content += "ssid=" + wifi_ssid + "\n";
-		content += "pass=" + wifi_password + "\n";
-		save_config("wifi", content);
-        xSemaphoreGive(wifiConfigMutex);
-    }
-}
-
-bool is_wifi_connected() {
-    return (WiFi.status() == WL_CONNECTED);
-}
-
-wl_status_t get_wifi_link_status() {
-    return WiFi.status();
-}
-
-int get_wifi_rssi() {
-    return WiFi.RSSI();
 }
 
 /**
@@ -224,6 +196,46 @@ static void setup_wifi() {
     }
 }
 
+/* -------------------------------------------------------------------------- */
+/*                              PUBLIC FUNCTIONS                              */
+/* -------------------------------------------------------------------------- */
+
+String getWifiSSID() {
+    String val = "";
+	val = wifi_ssid;
+    return val;
+}
+
+String getWifiPassword() {
+    String val = "";
+	val = wifi_password;
+    return val;
+}
+
+void updateWifiConfig(const String &newSsid, const String &newPass) {
+    if (wifiConfigMutex != NULL && xSemaphoreTake(wifiConfigMutex, portMAX_DELAY) == pdTRUE) {
+		String content = "";
+        wifi_ssid = newSsid;
+        wifi_password = newPass;
+		content += "ssid=" + wifi_ssid + "\n";
+		content += "pass=" + wifi_password + "\n";
+		save_config("wifi", content);
+        xSemaphoreGive(wifiConfigMutex);
+    }
+}
+
+bool is_wifi_connected() {
+    return (WiFi.status() == WL_CONNECTED);
+}
+
+wl_status_t get_wifi_link_status() {
+    return WiFi.status();
+}
+
+int get_wifi_rssi() {
+    return WiFi.RSSI();
+}
+
 void vWifiTask(void *pvParameters) {
     /* Wait until log initialized) */
     waiting_on_event(SYSTEM_EVENT, MODE_NORMAL, portMAX_DELAY);
@@ -254,5 +266,6 @@ void vWifiTask(void *pvParameters) {
         vTaskDelay(pdMS_TO_TICKS(5000));
     }
 }
+
 
 
