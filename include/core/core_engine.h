@@ -41,7 +41,7 @@ typedef enum {
     MODE_PROVISIONING __attribute__((deprecated("Use SYS_PROVISIONING instead"))) = SYS_PROVISIONING,
     MODE_OTA_UPDATE   __attribute__((deprecated("Use SYS_OTA_UPDATE instead")))   = SYS_OTA_UPDATE,
     MODE_SAFE_MODE    __attribute__((deprecated("Use SYS_SAFE_MODE instead")))    = SYS_SAFE_MODE
-} SystemMode_t;
+} SystemState_t;
 
 /**
  * @brief Layer-2 / Layer-3 Network Connectivity State
@@ -85,7 +85,7 @@ typedef enum {
  * Encapsulates the independent status of all core subsystems.
  */
 typedef struct {
-    SystemMode_t     mode;        /**< Global system mode context */
+    SystemState_t     mode;        /**< Global system mode context */
     NetworkState_t   network;     /**< L2/L3 Network status */
     WebServerState_t web;         /**< WebServer/WebSocket service status */
     MqttState_t      mqtt;        /**< MQTT client status */
@@ -101,7 +101,7 @@ typedef struct {
 void CoreState_Get(CoreSystemStateMatrix_t* p_out_state);
 
 /** @brief Gets current system mode. */
-SystemMode_t CoreState_GetMode();
+SystemState_t CoreState_GetMode();
 
 /** @brief Gets current network state. */
 NetworkState_t CoreState_GetNetwork();
@@ -116,7 +116,7 @@ MqttState_t CoreState_GetMqtt();
 bool CoreState_GetStorageStatus();
 
 /** @brief Sets system mode context. */
-void CoreState_SetMode(SystemMode_t mode);
+void CoreState_SetMode(SystemState_t mode);
 
 /** @brief Sets network state. */
 void CoreState_SetNetwork(NetworkState_t state);

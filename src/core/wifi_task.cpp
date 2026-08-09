@@ -238,7 +238,7 @@ int get_wifi_rssi() {
 
 void vWifiTask(void *pvParameters) {
     /* Wait until log initialized) */
-    waiting_on_event(SYSTEM_EVENT, MODE_NORMAL, portMAX_DELAY);
+    waiting_on_event(SYSTEM_EVENT, SYS_NORMAL, portMAX_DELAY);
 	loadWifiConfig();
     setup_wifi();
     for (;;) {

@@ -195,7 +195,7 @@ static void initLogTask() {
  * @brief Updates system mode to normal to enable Serial log output.
  */
 static void setSerialLogReady() {
-    CoreState_SetMode(MODE_NORMAL);
+    CoreState_SetMode(SYS_NORMAL);
 }
 
 /* -------------------------------------------------------------------------- */
@@ -211,7 +211,7 @@ void logPrint(const String &msg, LogLevel level) {
     if (level < currentLogLevel) 
         return;
 
-    bool serial_ready = (CoreState_GetMode() >= MODE_NORMAL);
+    bool serial_ready = (CoreState_GetMode() >= SYS_NORMAL);
     WebServerState_t webState = CoreState_GetWebServer();
     bool web_ready = (webState == WEB_STATE_LISTENING || webState == WEB_STATE_CLIENT_CONNECTED);
 
@@ -298,7 +298,7 @@ void postIncomingCommand(const String &cmdText) {
  */
 void vLogTask(void *pvParameters) {
     /* Wait until core engine is done */
-    waiting_on_event(SYSTEM_EVENT, MODE_SETUP, portMAX_DELAY);
+    waiting_on_event(SYSTEM_EVENT, SYS_SETUP, portMAX_DELAY);
     CommandPacket packet;
     initLogTask();
     setSerialLogReady();
