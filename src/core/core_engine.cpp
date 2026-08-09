@@ -1,5 +1,6 @@
 #include "core/core_engine.h"
 #include "core/pin_config.h"
+#include "core/dispatcher.h"
 /* -------------------------------------------------------------------------- */
 /*                             DEFINES & CONSTANTS                            */
 /* -------------------------------------------------------------------------- */
@@ -238,7 +239,6 @@ void CoreEngine_Start() {
        NULL,
        1
     );
-
-    
     waiting_on_event(SYSTEM_EVENT, SYS_NORMAL, pdMS_TO_TICKS(5000));
+	dispatcher_init();
 }
