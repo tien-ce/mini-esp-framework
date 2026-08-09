@@ -62,7 +62,6 @@ a{text-decoration:none;}
 <table class="data-table">
   %SENSOR_TABLE_ROWS%
 </table>
-<a href='/console'><button>Console</button></a>
 <a href='/config'><button>Configuration</button></a>
 <a href='/info'><button>Information</button></a>
 <a href='/ota'><button>Firmware Upgrade</button></a>
