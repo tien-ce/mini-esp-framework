@@ -4,12 +4,14 @@
 /*                             DEFINES & CONSTANTS                            */
 /* -------------------------------------------------------------------------- */
 
-// Internal Bit Offset Map (4 bits per domain)
-#define OFFSET_MODE      0
-#define OFFSET_NETWORK   4
-#define OFFSET_WEB       8
-#define OFFSET_MQTT      12
-#define MASK_DOMAIN_4BIT 0x0F
+#define SYS_MAX_STATE       6   // MODE_BOOT -> MODE_SAFE_MODE
+#define NET_MAX_STATE       4   // NET_STATE_DISCONNECTED -> NET_STATE_WIFI_AP
+#define WEB_MAX_STATE       3   // WEB_STATE_STOPPED -> WEB_STATE_CLIENT_CONNECTED
+#define MQTT_MAX_STATE      4   // MQTT_STATE_DISCONNECTED -> MQTT_STATE_ERROR
+#define MAX_EVENT           4   
+
+#define MAX_OFFSET          GetDomainOffset((Event_t)(MAX_EVENT - 1))
+#define GET_DOMAIN_MASK(type) ((1UL << (GetDomainNumState(type))) - 1)
 
 /* -------------------------------------------------------------------------- */
 /*                              STATIC VARIABLES                              */
@@ -23,27 +25,40 @@ static EventGroupHandle_t       g_state_event_group = NULL;
 /*                              STATIC FUNCTIONS                              */
 /* -------------------------------------------------------------------------- */
 
-/** @brief Gets bit offset in event group for domain event type. */
-static uint8_t GetDomainOffset(Event_t type) {
+/** @brief Gets total number of states for domain event type */
+static uint8_t GetDomainNumState(Event_t type) {
     switch (type) {
-        case SYSTEM_EVENT:  return OFFSET_MODE;
-        case NETWORK_EVENT: return OFFSET_NETWORK;
-        case WEB_EVENT:     return OFFSET_WEB;
-        case MQTT_EVENT:    return OFFSET_MQTT;
-        default:            return 0xFF; // Invalid
+        case SYSTEM_EVENT:  return SYS_MAX_STATE;
+        case NETWORK_EVENT: return NET_MAX_STATE;
+        case WEB_EVENT:     return WEB_MAX_STATE;
+        case MQTT_EVENT:    return MQTT_MAX_STATE;
+        default:            return 0;
     }
 }
 
-/** @brief Updates domain bits in state event group. */
+/** @brief Gets bit offset in event group for domain event type. */
+static uint8_t GetDomainOffset(Event_t type) {
+    switch (type) {
+        case SYSTEM_EVENT:  return 0;
+        case NETWORK_EVENT: return SYS_MAX_STATE;
+        case WEB_EVENT:     return SYS_MAX_STATE + NET_MAX_STATE;
+        case MQTT_EVENT:    return SYS_MAX_STATE + NET_MAX_STATE + WEB_MAX_STATE;
+        default:            return 0xFF;
+    }
+}
+
+/** @brief Updates domain bits in state event group dynamically. */
 static void UpdateDomainBits(Event_t type, uint8_t new_state) {
     uint8_t offset = GetDomainOffset(type);
-    if (offset == 0xFF) return;
+    if (offset > MAX_OFFSET || offset == 0xFF) return;
 
-    // 1. Clear all 4 bits allocated for this domain
-    xEventGroupClearBits(g_state_event_group, (MASK_DOMAIN_4BIT << offset));
+    // 1. Clear exactly allocated bits for this domain
+    EventBits_t mask_to_clear = (EventBits_t)(GET_DOMAIN_MASK(type) << offset);
+    xEventGroupClearBits(g_state_event_group, mask_to_clear);
 
     // 2. Set bit corresponding to new_state
-    xEventGroupSetBits(g_state_event_group, (1 << (offset + new_state)));
+    EventBits_t bit_to_set = (EventBits_t)(1 << (offset + new_state));
+    xEventGroupSetBits(g_state_event_group, bit_to_set);
 }
 
 /** @brief Initializes state matrix mutex and event group. */
