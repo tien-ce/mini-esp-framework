@@ -17,7 +17,8 @@ typedef enum {
     SYSTEM_EVENT = 0,
     NETWORK_EVENT,
     WEB_EVENT,
-    MQTT_EVENT
+    MQTT_EVENT,
+	MAX_EVENT
 } Event_t;
 
 /**
@@ -25,12 +26,21 @@ typedef enum {
  * Represents the high-level operating context of the device.
  */
 typedef enum {
-    MODE_BOOT = 0,          /**< System powering on; queues and heap allocating */
-    MODE_SETUP,             /**< Reading NVS configs & starting initial core tasks */
-    MODE_NORMAL,            /**< Standard production execution mode, after as least serial start */
-    MODE_PROVISIONING,      /**< AP/Setup mode waiting for credentials */
-    MODE_OTA_UPDATE,        /**< Firmware update in progress */
-    MODE_SAFE_MODE          /**< Hardware failure or critical config missing */
+    SYS_BOOT = 0,         /**< System powering on; queues and heap allocating */
+    SYS_SETUP,            /**< Reading NVS configs & starting initial core tasks */
+    SYS_NORMAL,           /**< Standard production execution mode, after at least serial start */
+    SYS_PROVISIONING,     /**< AP/Setup mode waiting for credentials */
+    SYS_OTA_UPDATE,       /**< Firmware update in progress */
+    SYS_SAFE_MODE,        /**< Hardware failure or critical config missing */
+    SYS_MAX_STATE,
+
+    /* --- Deprecated aliases for v1.0.0 compatibility --- */
+    MODE_BOOT         __attribute__((deprecated("Use SYS_BOOT instead")))         = SYS_BOOT,
+    MODE_SETUP        __attribute__((deprecated("Use SYS_SETUP instead")))        = SYS_SETUP,
+    MODE_NORMAL       __attribute__((deprecated("Use SYS_NORMAL instead")))       = SYS_NORMAL,
+    MODE_PROVISIONING __attribute__((deprecated("Use SYS_PROVISIONING instead"))) = SYS_PROVISIONING,
+    MODE_OTA_UPDATE   __attribute__((deprecated("Use SYS_OTA_UPDATE instead")))   = SYS_OTA_UPDATE,
+    MODE_SAFE_MODE    __attribute__((deprecated("Use SYS_SAFE_MODE instead")))    = SYS_SAFE_MODE
 } SystemMode_t;
 
 /**
@@ -41,9 +51,9 @@ typedef enum {
     NET_STATE_DISCONNECTED = 0, /**< Wi-Fi radio off or disconnected from AP */
     NET_STATE_CONNECTING,       /**< Actively negotiating link or waiting for DHCP IP */
     NET_STATE_WIFI_STA,         /**< Connected as Station with valid IP assigned */
-    NET_STATE_WIFI_AP           /**< Operating as local Access Point (Fallback / Portal) */
+    NET_STATE_WIFI_AP,			/**< Operating as local Access Point (Fallback / Portal) */
+	NET_MAX_STATE
 } NetworkState_t;
-
 /**
  * @brief Web Server & WebSocket Service State
  * Managed exclusively by `web_server`.
@@ -51,9 +61,9 @@ typedef enum {
 typedef enum {
     WEB_STATE_STOPPED = 0,      /**< HTTP listening sockets bound down / inactive */
     WEB_STATE_LISTENING,        /**< HTTP server running on port 80/8088 waiting for requests */
-    WEB_STATE_CLIENT_CONNECTED  /**< HTTP server active with 1 or more active WebSocket clients */
+    WEB_STATE_CLIENT_CONNECTED, /**< HTTP server active with 1 or more active WebSocket clients */
+	WEB_MAX_STATE
 } WebServerState_t;
-
 /**
  * @brief Layer-7 MQTT Broker Service State
  * Managed exclusively by `mqtt_task`.
@@ -62,7 +72,8 @@ typedef enum {
     MQTT_STATE_DISCONNECTED = 0,/**< Broker socket closed or inactive */
     MQTT_STATE_CONNECTING,      /**< TCP socket open; negotiating MQTT CONNECT/CONNACK */
     MQTT_STATE_CONNECTED,       /**< Authenticated with broker; ready to pub/sub telemetry */
-    MQTT_STATE_ERROR            /**< Authentication failed or invalid broker endpoint */
+    MQTT_STATE_ERROR,            /**< Authentication failed or invalid broker endpoint */
+	MQTT_MAX_STATE
 } MqttState_t;
 
 // ============================================================================
