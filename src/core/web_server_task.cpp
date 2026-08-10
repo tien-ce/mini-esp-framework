@@ -107,18 +107,18 @@ static String renderTemplate(const char* templateStr) {
     page.replace("%APP_VERSION%", String(FIRMWARE_VERSION));
     page.replace("%BUILD_DATE%", String(__DATE__) + " " + String(__TIME__));
     page.replace("%SDK_VERSION%", String(ESP.getSdkVersion()));
-    page.replace("%HOSTNAME%", "tasmota-" + WiFi.macAddress());
+    page.replace("%HOSTNAME%", "tasmota-" + String(esp_info_get_mac_str()));
     page.replace("%CHIP_MODEL%", String(esp_info_get_model()));
     page.replace("%MAC_ADDR%", String(esp_info_get_mac_str()));
     page.replace("%FLASH_SIZE%", String(ESP.getFlashChipSize() / 1024) + " KB");
     page.replace("%SENSOR_TABLE_ROWS%", tableRowsHTML);
     page.replace("%GPIO_TABLE_ROWS%", generatePinRows());
     page.replace("%UPTIME%", formatUptime(millis() / 1000));
-    page.replace("%IP_ADDR%", WiFi.localIP().toString());
+    page.replace("%IP_ADDR%", getWifiSSID());
     page.replace("%GATEWAY%", WiFi.gatewayIP().toString());
     page.replace("%SUBNET_MASK%", WiFi.subnetMask().toString());
     page.replace("%DNS_SERVER%", WiFi.dnsIP().toString());
-    page.replace("%FREE_RAM%", String(ESP.getFreeHeap() / 1024.0, 1) + " KB");
+    page.replace("%FREE_RAM%", String(esp_info_get_free_heap() / 1024.0, 1) + " KB");
     return page;
 }
 

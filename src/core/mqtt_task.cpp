@@ -3,6 +3,7 @@
 #include "core/core_engine.h"
 #include "core/dispatcher.h"
 #include "core/log_task.h"
+#include "core/info.h"
 #include "config.h"
 
 #include <WiFi.h>
@@ -101,7 +102,7 @@ static void loadMqttConfig() {
 static void connectBroker() {
     if (mqttClient.connected()) return;
 
-    String clientId = "ESP32_" + WiFi.macAddress();
+    String clientId = String(esp_info_get_model()) + "_" + String(esp_info_get_mac_str());
     mqttClient.setServer(mqtt_server.c_str(), mqtt_port);
 
     LOG_INFO("Connecting to MQTT Broker: " + mqtt_server);
@@ -162,7 +163,7 @@ void vMqttTask(void *pvParameters) {
     TickType_t xLastWakeTime = xTaskGetTickCount();
 
     for (;;) {
-        if (WiFi.status() == WL_CONNECTED) {
+        if (is_wifi_connected()) {
             if (!mqttClient.connected()) {
                 connectBroker();
             }
@@ -173,8 +174,8 @@ void vMqttTask(void *pvParameters) {
                 if (mqttMutex != NULL && xSemaphoreTake(mqttMutex, portMAX_DELAY) == pdTRUE) {
                     mqttDoc.clear();
 
-                    mqttDoc["clientID"] = "ESP32_" + WiFi.macAddress();
-                    mqttDoc["ip"]       = WiFi.localIP().toString();
+                    mqttDoc["clientID"] = String(esp_info_get_model()) + "_" + String(esp_info_get_mac_str());
+                    mqttDoc["ip"]       = getWifiSSID();
                     mqttDoc["rssi"]     = WiFi.RSSI();
                     mqttDoc["freeHeap"] = ESP.getFreeHeap();
                     mqttDoc["uptime"]   = millis() / 1000;
