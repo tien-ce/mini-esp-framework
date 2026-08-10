@@ -25,7 +25,11 @@ typedef enum {
     
     /* Web */
     SIG_WEB_POLL,
+    
+    /* MQTT */
+    SIG_MQTT_PUBLISH,
     SIG_MAX
+
 } Signal_t;
 
 #define SIG_MASK_10MS  (1UL << SIG_10MS)

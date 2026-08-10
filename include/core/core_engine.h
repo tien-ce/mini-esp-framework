@@ -9,6 +9,7 @@
 #include "core/dispatcher.h"
 #include "core/info.h"
 #include "core/pin_config.h"
+#include "core/mqtt_task.h"
 // ============================================================================
 // 1. DOMAIN-SPECIFIC STATE ENUMERATIONS
 // ============================================================================

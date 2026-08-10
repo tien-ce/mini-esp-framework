@@ -239,6 +239,17 @@ void CoreEngine_Start() {
        NULL,
        1
     );
+
+    // Task: MQTT Client Task (Priority 1)
+    xTaskCreatePinnedToCore(
+       vMqttTask,
+       "MqttTask",
+       4096,
+       NULL,
+       1,
+       NULL,
+       1
+    );
     waiting_on_event(SYSTEM_EVENT, SYS_NORMAL, pdMS_TO_TICKS(5000));
 	dispatcher_init();
 }
