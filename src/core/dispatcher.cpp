@@ -5,6 +5,7 @@
 #include <cstddef>
 #include <esp_timer.h>
 
+/* Define weak Xdrv functions */
 DEFINE_WEAK_XDRV(1)
 DEFINE_WEAK_XDRV(2)
 DEFINE_WEAK_XDRV(3)
@@ -16,12 +17,29 @@ DEFINE_WEAK_XDRV(8)
 DEFINE_WEAK_XDRV(9)
 DEFINE_WEAK_XDRV(10)
 
+/* Define weak Xsns functions */
+DEFINE_WEAK_XSNS(1)
+DEFINE_WEAK_XSNS(2)
+DEFINE_WEAK_XSNS(3)
+DEFINE_WEAK_XSNS(4)
+DEFINE_WEAK_XSNS(5)
+DEFINE_WEAK_XSNS(6)
+DEFINE_WEAK_XSNS(7)
+DEFINE_WEAK_XSNS(8)
+DEFINE_WEAK_XSNS(9)
+DEFINE_WEAK_XSNS(10)
+
 typedef bool (*XdrvFunc_t)(Signal_t);
 
 /* ----------------------- Static Variables ------------------------------*/
 static const XdrvFunc_t g_xdrv_table[NUM_DRIVERS] = {
     Xdrv1, Xdrv2, Xdrv3, Xdrv4, Xdrv5,
     Xdrv6, Xdrv7, Xdrv8, Xdrv9, Xdrv10
+};
+
+static const XdrvFunc_t g_xsns_table[NUM_SENSORS] = {
+    Xsns1, Xsns2, Xsns3, Xsns4, Xsns5,
+    Xsns6, Xsns7, Xsns8, Xsns9, Xsns10
 };
 
 static TaskHandle_t s_dispatcher_task_handle = NULL;
@@ -67,6 +85,11 @@ static void execute_dispatch(Signal_t signal) {
             g_xdrv_table[i](signal);
         }
     }
+    for (uint8_t i = 0; i < NUM_SENSORS; i++) {
+        if (g_xsns_table[i] != NULL) {
+            g_xsns_table[i](signal);
+        }
+    }
 }
 
 /**
@@ -74,7 +97,7 @@ static void execute_dispatch(Signal_t signal) {
  */
 static void vDispatcherTask(void *pvParameters) {
     uint32_t notified_bits = 0;
-
+    execute_dispatch(SIG_INIT); // Initial dispatch for all drivers
     for (;;) {
         if (xTaskNotifyWait(0x00, ULONG_MAX, &notified_bits, portMAX_DELAY) == pdTRUE) {
             if (notified_bits & SIG_MASK_10MS) {
@@ -116,14 +139,16 @@ void dispatcher_init(void) {
 }
 
 void dispatch_signal(Signal_t signal) {
-    if (s_dispatcher_task_handle == NULL || signal >= SIG_MAX) return;
+    if (s_dispatcher_task_handle == NULL || signal >= SIG_MAX) 
+        return;
 
     uint32_t bit_to_set = (1UL << signal);
     xTaskNotify(s_dispatcher_task_handle, bit_to_set, eSetBits);
 }
 
 void dispatch_signal_from_isr(Signal_t signal, BaseType_t *pxHigherPriorityTaskWoken) {
-    if (s_dispatcher_task_handle == NULL || signal >= SIG_MAX) return;
+    if (s_dispatcher_task_handle == NULL || signal >= SIG_MAX) 
+        return;
 
     uint32_t bit_to_set = (1UL << signal);
     xTaskNotifyFromISR(s_dispatcher_task_handle, bit_to_set, eSetBits, pxHigherPriorityTaskWoken);
