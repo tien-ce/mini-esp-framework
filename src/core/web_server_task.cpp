@@ -28,7 +28,6 @@ static AsyncWebServer *server= NULL;
 static SemaphoreHandle_t webConfigMutex = NULL;
 /* For register rows in table*/
 static String tableRowsHTML="";
-static String jsonBuffer = "";
 /* Buffer dynamic JSON for HTTP Polling responses */
 static JsonDocument telemetryDoc;
 static String telemetryJson = "{}";
@@ -37,7 +36,6 @@ static String telemetryJson = "{}";
 /* -------------------------------------------------------------------------- */
 
 AsyncWebSocket ws("/ws");
-// AsyncWebSocket wsHome("/ws-home");
 
 /* -------------------------------------------------------------------------- */
 /*                              STATIC FUNCTIONS                              */
@@ -150,30 +148,6 @@ static void onWsEvent(AsyncWebSocket *server, AsyncWebSocketClient *client, AwsE
                 postIncomingCommand(msgStr);
             }
         }
-    }
-}
-
-/** @brief WebSocket event handler for /ws-home telemetry endpoint. */
-static void onHomeWsEvent(AsyncWebSocket *server, 
-                   AsyncWebSocketClient *client, 
-                   AwsEventType type, 
-                   void *arg, 
-                   uint8_t *data, 
-                   size_t len) {
-    switch (type) {
-        case WS_EVT_CONNECT:
-            // Client connected to /ws-home endpoint
-            break;
-
-        case WS_EVT_DISCONNECT:
-            // Client disconnected
-            break;
-
-        case WS_EVT_DATA:
-        case WS_EVT_PONG:
-        case WS_EVT_ERROR:
-            // Ignore incoming messages from client
-            break;
     }
 }
 

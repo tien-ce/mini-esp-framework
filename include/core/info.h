@@ -6,7 +6,7 @@
 
 #define CHIP_MODEL_STR_MAX_LEN 16
 #define MAC_STR_LEN            18
-#define FW_VERSION_STR         "1.1.0"
+#define FW_VERSION_STR         "1.1.1"
 
 /**
  * @brief Structure storing relevant web display information.
