@@ -99,15 +99,16 @@ static void vDispatcherTask(void *pvParameters) {
     uint32_t notified_bits = 0;
     execute_dispatch(SIG_INIT); // Initial dispatch for all drivers
     for (;;) {
+        /* Wait indefinitely for a notification, might be constain multiple set bits */
         if (xTaskNotifyWait(0x00, ULONG_MAX, &notified_bits, portMAX_DELAY) == pdTRUE) {
-            if (notified_bits & SIG_MASK_10MS) {
-                execute_dispatch(SIG_10MS);
-            }
-            if (notified_bits & SIG_MASK_100MS) {
-                execute_dispatch(SIG_100MS);
-            }
-            if (notified_bits & SIG_MASK_1SEC) {
-                execute_dispatch(SIG_1SEC);
+            // Check each bit in notified_bits and dispatch corresponding signals
+            while (notified_bits)
+            {
+                Signal_t sig = (Signal_t) __builtin_ctz(notified_bits); // Get the index of the least significant (Count Trailing Zeros) 
+                if (sig < SIG_MAX) {
+                    execute_dispatch(sig);
+                }
+                notified_bits &= ~(1UL << sig); // Clear the dispatched bit
             }
         }
     }

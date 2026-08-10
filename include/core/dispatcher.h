@@ -32,11 +32,6 @@ typedef enum {
 
 } Signal_t;
 
-#define SIG_MASK_10MS  (1UL << SIG_10MS)
-#define SIG_MASK_100MS (1UL << SIG_100MS)
-#define SIG_MASK_1SEC  (1UL << SIG_1SEC)
-
-/** @brief Dispatch signal to all registered drivers */
 void dispatch_signal(Signal_t signal);
 
 /** @brief Initialize hardware timer interrupt for signal generation */
