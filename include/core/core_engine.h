@@ -1,14 +1,14 @@
 #ifndef CORE_ENGINE_H
 #define CORE_ENGINE_H
 
-#include <Arduino.h>
+/* Core Headers (public for other modules)*/
 #include "core/config_manager.h"
 #include "core/log_task.h"
 #include "core/wifi_task.h"
 #include "core/web_server_task.h"
-#include <freertos/FreeRTOS.h>
-#include <freertos/queue.h>
-
+#include "core/dispatcher.h"
+#include "core/info.h"
+#include "core/pin_config.h"
 // ============================================================================
 // 1. DOMAIN-SPECIFIC STATE ENUMERATIONS
 // ============================================================================

@@ -12,11 +12,11 @@
 #include "html/config_html.h"
 #include "html/config_module_html.h"
 #include "core/pin_config.h"
-
+#include "core/dispatcher.h"
 #include <Arduino.h>
 #include <WiFi.h>
 #include <semphr.h>
-
+#include <ArduinoJson.h>
 /* -------------------------------------------------------------------------- */
 /*                              STATIC VARIABLES                              */
 /* -------------------------------------------------------------------------- */
@@ -29,14 +29,15 @@ static SemaphoreHandle_t webConfigMutex = NULL;
 /* For register rows in table*/
 static String tableRowsHTML="";
 static String jsonBuffer = "";
-static uint32_t nextID = 1;
-
+/* Buffer dynamic JSON for HTTP Polling responses */
+static JsonDocument telemetryDoc;
+static String telemetryJson = "{}";
 /* -------------------------------------------------------------------------- */
 /*                              GLOBAL VARIABLES                              */
 /* -------------------------------------------------------------------------- */
 
 AsyncWebSocket ws("/ws");
-AsyncWebSocket wsHome("/ws-home");
+// AsyncWebSocket wsHome("/ws-home");
 
 /* -------------------------------------------------------------------------- */
 /*                              STATIC FUNCTIONS                              */
@@ -121,6 +122,12 @@ static String renderTemplate(const char* templateStr) {
     page.replace("%DNS_SERVER%", WiFi.dnsIP().toString());
     page.replace("%FREE_RAM%", String(ESP.getFreeHeap() / 1024.0, 1) + " KB");
     return page;
+}
+
+/** * @brief Clears the telemetry JSON data.*/
+static void clearTelemetryJson() {
+    telemetryJson = "{}";
+    telemetryDoc.clear();
 }
 
 /** @brief WebSocket event handler for /ws terminal console endpoint. */
@@ -245,8 +252,8 @@ static void setupWebServer() {
     ws.setAuthentication(getWebUsername().c_str(), getWebPassword().c_str());
     ws.onEvent(onWsEvent);
     server->addHandler(&ws);
-    wsHome.onEvent(onHomeWsEvent);
-    server->addHandler(&wsHome);
+    // wsHome.onEvent(onHomeWsEvent);
+    // server->addHandler(&wsHome);
     // Page 1: Main Menu UI
     server->on("/", HTTP_GET, [](AsyncWebServerRequest *request) {
         if (!request->authenticate(getWebUsername().c_str(), getWebPassword().c_str())) {
@@ -397,7 +404,18 @@ static void setupWebServer() {
         vTaskDelay(pdMS_TO_TICKS(1000));
         ESP.restart();
     });
-
+    // Endpoint: Telemetry Data Retrieval
+    server->on("/api/telemetry", HTTP_GET, [](AsyncWebServerRequest *request) {
+        if (!request->authenticate(getWebUsername().c_str(), getWebPassword().c_str())) {
+            return request->requestAuthentication();
+        }
+        // Trigger telemetry data update before sending
+        dispatch_signal(SIG_WEB_POLL); 
+        request->send(200, "application/json", telemetryJson);
+        // Clear telemetryJson after sending to prepare for next update
+        clearTelemetryJson();
+    });
+    
     // Endpoint: OTA Firmware Upload Handler
     server->on("/doUpdate", HTTP_POST,
         [](AsyncWebServerRequest *request) {
@@ -440,15 +458,27 @@ static void setupWebServer() {
 /* -------------------------------------------------------------------------- */
 /*                              PUBLIC FUNCTIONS                              */
 /* -------------------------------------------------------------------------- */
-
 uint8_t registerElement(const String& label, const String& unit, const String& initialValue) {
-    uint8_t assignedId = nextID++;
-    tableRowsHTML += "<tr>";
-    tableRowsHTML += "<td class='label'>" + label + "</td>";
-    tableRowsHTML += "<td class='value'><span id='val-" + String(assignedId) + "'>" + initialValue + "</span> " + unit + "</td>";
-    tableRowsHTML += "</tr>";
+    updateElementValue(label, initialValue);
     LOG_DEBUG("tableRowsHTML: " + tableRowsHTML);
-    return assignedId;
+    return 0;
+}
+
+void updateElementValue(uint8_t id, const String& newValue) {
+    
+    updateElementValue(String(id), newValue);
+    
+    // Note: When sending, the buffer will be closed with a "]" to form a valid JSON array,
+    // and then cleared for the next batch of updates.
+}
+
+void updateElementValue(const String& key, const String& newValue) {
+    // Update the value in the telemetry JSON document
+    telemetryDoc[key] = newValue;
+
+    // Serialize JsonDocument to telemetryJson string for HTTP Polling responses
+    telemetryJson = "";
+    serializeJson(telemetryDoc, telemetryJson);
 }
 
 uint16_t getWebPort() { 
@@ -473,26 +503,6 @@ void updateWebConfig(uint16_t port, const String &user, const String &pass) {
     saveWebConfig();
 }
 
-/**
- * @brief Appends an element update payload to a static JSON buffer for batch WebSocket transmission.
- * 
- * @param id The unique ID assigned during element registration.
- * @param newValue The updated value string to push to the client.
- */
-void updateElementValue(uint8_t id, const String& newValue) {
-    
-    // Format JSON payload: {"id":1,"val":"26.5"}
-    String payload = "{\"id\":" + String(id) + ",\"val\":\"" + newValue + "\"}";
-    
-    if (jsonBuffer.length() == 0) {
-        jsonBuffer = "[" + payload;
-    } else {
-        jsonBuffer += "," + payload;
-    }
-    
-    // Note: When sending, the buffer will be closed with a "]" to form a valid JSON array,
-    // and then cleared for the next batch of updates.
-}
 
 /**
  * @brief Web Server & System Maintenance Task
@@ -507,12 +517,6 @@ void vWebMonitorTask(void *pvParameters) {
     setupWebServer();
     for (;;) {
         ws.cleanupClients();
-        wsHome.cleanupClients();
-        if (jsonBuffer.length() > 0) {
-            String payload = jsonBuffer + "]";
-            wsHome.textAll(payload);
-            jsonBuffer = ""; // Reset buffer
-        }
         vTaskDelay(pdMS_TO_TICKS(5000));
     }
 }

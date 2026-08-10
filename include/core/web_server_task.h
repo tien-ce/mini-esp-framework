@@ -38,10 +38,22 @@ void updateWebConfig(uint16_t port, const String &user, const String &pass);
 void vWebMonitorTask(void *pvParameters);
 
 /** @brief Registers dynamic table element and returns unique ID. */
+// Mark deprecated: registerElement is no longer needed in HTTP Polling pattern
+[[deprecated("registerElement() is outdated and does nothing. UI elements are rendered dynamically via HTTP Polling.")]]
 uint8_t registerElement(const String& label, const String& unit, const String& initialValue);
 
-/** @brief Pushes dynamic element update to WebSocket clients. */
+/**
+ * @brief Appends an element update payload to a static JSON buffer for batch WebSocket transmission.
+ * 
+ * @param id The unique ID assigned during element registration.
+ * @param newValue The updated value string to push to the client.
+ */
+[[deprecated("updateElementValue() is outdated and does nothing. Use updateElementValue to register key-value pairs.")]]
 void updateElementValue(uint8_t id, const String& newValue);
+/**
+ * @brief New implementation of updateElementValue that uses key-value pairs for telemetry updates.
+ */
+void updateElementValue(const String& key, const String& newValue);
 
 #endif // WEB_SERVER_TASK_H
 

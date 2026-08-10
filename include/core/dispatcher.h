@@ -7,15 +7,24 @@
 #include <freertos/task.h>
 
 #define NUM_DRIVERS 10
-
+#define NUM_SENSORS 10
 // Macro to declare a single weak Xdrv function returning false
 #define DEFINE_WEAK_XDRV(num) \
     __attribute__((weak)) bool Xdrv##num(Signal_t func) { return false; }
 
+// Macro to declare all weak Xsns functions from 1 to NUM_SENSORS
+#define DEFINE_WEAK_XSNS(num) \
+    __attribute__((weak)) bool Xsns##num(Signal_t func) { return false; }
+
 typedef enum {
-    SIG_10MS = 0,
+    SIG_INIT = 0,
+    /* Timer */
+    SIG_10MS,
     SIG_100MS,
-    SIG_1SEC,    
+    SIG_1SEC,
+    
+    /* Web */
+    SIG_WEB_POLL,
     SIG_MAX
 } Signal_t;
 

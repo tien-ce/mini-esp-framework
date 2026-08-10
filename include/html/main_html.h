@@ -52,22 +52,24 @@ a{text-decoration:none;}
   color: #ffffff;
   font-weight: bold;
 }
-
 </style>
 </head>
 <body>
 <div class='wrapper'>
 <h1 id='deviceHeader'>%HEADER_TITLE%</h1>
 <h2 id='deviceSubHeader'>%HEADER_SUBTITLE%</h2>
+
 <table class="data-table">
-  %SENSOR_TABLE_ROWS%
+  <tbody id="sensorTable">
+    %SENSOR_TABLE_ROWS%
+  </tbody>
 </table>
+
 <a href='/config'><button>Configuration</button></a>
 <a href='/info'><button>Information</button></a>
 <a href='/ota'><button>Firmware Upgrade</button></a>
 <a href='/tools'><button>Tools</button></a>
-<a href='/resetConfig' onclick="return confirm('Restart ESP32?');"><button class='btn-red'>Restart</button></a>
-
+<button class='btn-red' onclick="if(confirm('Restart device?')) fetch('/restart');">Restart</button>
 
 <div class='footer-text' id='footerText'>
     Model: %CHIP_MODEL% | MAC: %MAC_ADDR%<br>
@@ -76,44 +78,47 @@ a{text-decoration:none;}
 </div>
 
 <script>
-// Initialize WebSocket connection to /ws-home endpoint
-var gateway = `ws://${window.location.host}/ws-home`;
-var websocket;
-
-function initWebSocket() {
-  websocket = new WebSocket(gateway);
-  websocket.onopen = onOpen;
-  websocket.onclose = onClose;
-  websocket.onmessage = onMessage;
-}
-
-function onOpen(event) {
-  console.log('WebSocket connection established');
-}
-
-function onClose(event) {
-  console.log('WebSocket connection closed, retrying...');
-  setTimeout(initWebSocket, 2000); // Auto-reconnect after 2s
-}
-
-function onMessage(event) {
-  try {
-    // Parse received batch JSON payload: [{"id":1,"val":"26.5"},{"id":2,"val":"60"}]
-    var updates = JSON.parse(event.data);
-    
-    // Update DOM elements matching id "val-X"
-    updates.forEach(function(item) {
-      var elem = document.getElementById('val-' + item.id);
-      if (elem) {
-        elem.innerText = item.val;
+/**
+ * Fetch Telemetry data from Server via HTTP GET Request
+ */
+function fetchTelemetry() {
+  fetch('/api/telemetry')
+    .then(response => {
+      if (!response.ok) throw new Error('Network error');
+      return response.json();
+    })
+    .then(data => {
+      var table = document.getElementById('sensorTable');
+      if (!table) return;
+      
+      table.innerHTML = ''; 
+      
+      for (var key in data) {
+        if (data.hasOwnProperty(key)) {
+          var row = document.createElement('tr');
+          
+          var cellLabel = document.createElement('td');
+          cellLabel.className = 'label';
+          cellLabel.innerText = key;
+          
+          var cellVal = document.createElement('td');
+          cellVal.className = 'value';
+          cellVal.innerText = data[key];
+          
+          row.appendChild(cellLabel);
+          row.appendChild(cellVal);
+          table.appendChild(row);
+        }
       }
-    });
-  } catch (e) {
-    console.error('Invalid JSON payload:', e);
-  }
+    })
+    .catch(err => console.error('Error fetching telemetry polling data:', err));
 }
 
-window.addEventListener('load', initWebSocket);
+// Poll telemetry data every 2 seconds
+setInterval(fetchTelemetry, 2000);
+
+// Initial fetch on page load
+window.addEventListener('load', fetchTelemetry);
 </script>
 
 </body>
