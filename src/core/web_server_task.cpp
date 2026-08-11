@@ -364,17 +364,17 @@ static void setupWebServer() {
         }
     });
 
-    // Endpoint: Reset Configuration to Defaults
-    server->on("/resetConfig", HTTP_POST, [](AsyncWebServerRequest *request) {
+    // Endpoint: Reboot System Device
+    server->on("/restart", HTTP_POST, [](AsyncWebServerRequest *request) {
         if (!request->authenticate(getWebUsername().c_str(), getWebPassword().c_str())) {
             return request->requestAuthentication();
         }
 
-        request->send(200, "text/plain", "Configuration reset! Restarting with default settings...");
+        request->send(200, "text/plain", "Restarting device...");
         xTaskCreate([](void *arg) {
             vTaskDelay(pdMS_TO_TICKS(RESTART_DELAY_MS));
             postIncomingCommand(CMD_RESTART);
-            vTaskDelete(NULL); // Delete task itself (might be never run)
+            vTaskDelete(NULL); // Delete task itself
         }, "deferred_restart", 2048, NULL, 1, NULL);
     });
 

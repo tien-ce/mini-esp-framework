@@ -44,7 +44,7 @@ a{text-decoration:none;}
 <button class='inactive'>Logging</button>
 <button class='inactive'>Other</button>
 <button class='inactive'>Template</button>
-<button class='btn-red' onclick="if(confirm('Reset Configuration?')) fetch('/resetConfig').then(()=>location.href='/')">Reset</button>
+<button class='inactive'>Reset</button>
 <button class='inactive'>Backup</button>
 <button class='inactive'>Restore</button>
 <a href='/'><button>Main Menu</button></a>
