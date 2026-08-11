@@ -30,7 +30,9 @@ static const char* AVAILABLE_PIN_OPTIONS[] = {
     "None",
     "User",
     "Button",
-    "Relay",
+    "Relay1",
+    "Relay2",
+    "Relay3",
     "PWM / LED",
     "I2C SDA",
     "I2C SCL",
@@ -56,6 +58,9 @@ static const BoardPinDef BOARD_PINS[] = {
     {3,  "GPIO3",  "None",        false},
     {4,  "GPIO4",  "None",        false},
     {5,  "GPIO5",  "None",        false},
+    {6,  "GPIO6",  "None",        false},
+    {7,  "GPIO7",  "None",        false},
+    {8,  "GPIO8",  "None",        false},
     {9,  "GPIO9",  "SPI Flash",   true},
     {10, "GPIO10", "SPI Flash",   true},
     {12, "GPIO12", "None",        false},
@@ -64,11 +69,11 @@ static const BoardPinDef BOARD_PINS[] = {
     {15, "GPIO15", "None",        false},
     {16, "GPIO16", "None",        false},
     /* Default RS485 Pins for esp32-rs485-can*/
-    {17, "GPIO17", "RS485_TX",        false},
-    {18, "GPIO18", "RS485_RX",        false},
-    {21, "GPIO21", "RS485_DE",        false},
+    {17, "GPIO17", "None",    false},
+    {18, "GPIO18", "None",    false},
+    {21, "GPIO21", "None",    false},
 
-    {47, "GPIO47", "None",  false}
+    {47, "GPIO47", "None",        false}
 };
 #define BOARD_PIN_COUNT (sizeof(BOARD_PINS) / sizeof(BOARD_PINS[0]))
 

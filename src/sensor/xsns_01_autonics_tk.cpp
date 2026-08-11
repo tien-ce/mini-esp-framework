@@ -1,3 +1,5 @@
+#include "config.h"
+#ifdef USE_AUTONICS_TK_SENSOR
 #include <Arduino.h>
 #include "core/core_engine.h"
 #include "modbus.h"
@@ -48,25 +50,25 @@ static void FormatValueWithDecimal(uint16_t raw_val, uint8_t dp, char* out_buf, 
     }
 }
 
-static bool ParseTKRegisters(const uint8_t* rx_buf, uint16_t rx_len, AutonicsTKData* out_data) {
+static void ParseTKRegisters(const uint8_t* rx_buf, uint16_t rx_len, AutonicsTKData* out_data) {
     out_data->raw_pv        = (rx_buf[0] << 8) | rx_buf[1];
     out_data->decimal_point = (rx_buf[2] << 8) | rx_buf[3];
     out_data->unit_code     = (rx_buf[4] << 8) | rx_buf[5];
     out_data->raw_sv        = (rx_buf[6] << 8) | rx_buf[7];
-    return true;
 }
 
 static bool CheckRS485PinConfig() {
-    if (!is_use_name("RS485_TX") || !is_use_name("RS485_RX") || !is_use_name("RS485_DE")) {
+    if (!is_use_name("RS485_TX") || !is_use_name("RS485_RX")) {
         LOG_WARNING("One or more RS485 pins are not configured.");
         return false;
     }
 
     rs485_tx_pin = get_gpio_by_name("RS485_TX");
     rs485_rx_pin = get_gpio_by_name("RS485_RX");
-    rs485_de_pin = get_gpio_by_name("RS485_DE");
+    if (is_use_name("RS485_DE"))
+        rs485_de_pin = get_gpio_by_name("RS485_DE");
 
-    if (rs485_tx_pin == GPIO_INVALID || rs485_rx_pin == GPIO_INVALID || rs485_de_pin == GPIO_INVALID) {
+    if (rs485_tx_pin == GPIO_INVALID || rs485_rx_pin == GPIO_INVALID) {
         LOG_ERROR("Failed to resolve GPIO pins for RS485.");
         return false;
     }
@@ -88,19 +90,19 @@ static void ProcessModbusPoll() {
         }
 
         AutonicsTKData data;
-        if (ParseTKRegisters(rx_buf, rx_len, &data)) {
-            FormatValueWithDecimal(data.raw_pv, data.decimal_point, pv_str, sizeof(pv_str));
-            FormatValueWithDecimal(data.raw_sv, data.decimal_point, sv_str, sizeof(sv_str));
-            const char* unit_str = GetUnitString(data.unit_code);
+        ParseTKRegisters(rx_buf, rx_len, &data);
+        FormatValueWithDecimal(data.raw_pv, data.decimal_point, pv_str, sizeof(pv_str));
+        FormatValueWithDecimal(data.raw_sv, data.decimal_point, sv_str, sizeof(sv_str));
+        const char* unit_str = GetUnitString(data.unit_code);
 
-            // Push Telemetry directly to web REST API
-            updateElementValue("Autonics PV", String(pv_str) + " " + String(unit_str));
-            updateElementValue("Autonics SV", String(sv_str) + " " + String(unit_str));
-        } else {
-            LOG_WARNING("[Xdrv2] Failed to parse Modbus registers.");
-        }
-    } else {
-        LOG_ERROR("[Xdrv2] Modbus Send Error: " + String(ModbusErrToStr(ret)));
+        // Push Telemetry directly to web REST API
+        updateElementValue("Autonics PV", String(pv_str) + " " + String(unit_str));
+        updateElementValue("Autonics SV", String(sv_str) + " " + String(unit_str));
+    } 
+    else {
+        LOG_WARNING("[Xdrv2] Failed to parse Modbus registers.");
+        snprintf(pv_str, sizeof(pv_str), "-1");
+        snprintf(sv_str, sizeof(sv_str), "-1");
     }
 }
 
@@ -124,22 +126,29 @@ bool Xsns1(Signal_t signal) {
         }
 
         case SIG_1SEC: {
-            if (!modbus_initialized) {
-                return false;
-            }
             ProcessModbusPoll();
+            rule_on_event("TK4S",atof(pv_str));
             return true;
         }
 
         case SIG_WEB_POLL: {
-            if (!modbus_initialized) {
-                return false;
-            }
-            ProcessModbusPoll();
+            FormatValueWithDecimal(atoi(pv_str), 0, pv_str, sizeof(pv_str));
+            FormatValueWithDecimal(atoi(sv_str), 0, sv_str, sizeof(sv_str));
+            updateElementValue("Autonics PV", String(pv_str));
+            updateElementValue("Autonics SV", String(sv_str));
             return true;
         }
-
+        
+        case SIG_MQTT_PUBLISH: {
+            FormatValueWithDecimal(atoi(pv_str), 0, pv_str, sizeof(pv_str));
+            FormatValueWithDecimal(atoi(sv_str), 0, sv_str, sizeof(sv_str));
+            mqtt_add_telemetry("Autonics PV", pv_str);
+            mqtt_add_telemetry("Autonics SV", sv_str);
+            return true;
+        }
         default:
             return false;
     }
 }
+
+#endif // USE_AUTONICS_TK_SENSOR
