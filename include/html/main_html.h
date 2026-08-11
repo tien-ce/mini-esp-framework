@@ -69,7 +69,7 @@ a{text-decoration:none;}
 <a href='/info'><button>Information</button></a>
 <a href='/ota'><button>Firmware Upgrade</button></a>
 <a href='/tools'><button>Tools</button></a>
-<button class='btn-red' onclick="if(confirm('Restart device?')) fetch('/restart');">Restart</button>
+<button class='btn-red' onclick="if(confirm('Restart device?')) fetch('/resetConfig');">Restart</button>
 
 <div class='footer-text' id='footerText'>
     Model: %CHIP_MODEL% | MAC: %MAC_ADDR%<br>

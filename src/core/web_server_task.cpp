@@ -17,6 +17,10 @@
 #include <WiFi.h>
 #include <semphr.h>
 #include <ArduinoJson.h>
+
+#define RESTART_DELAY_MS 2000
+#define OTA_RESTART_DELAY_MS 500
+
 /* -------------------------------------------------------------------------- */
 /*                              STATIC VARIABLES                              */
 /* -------------------------------------------------------------------------- */
@@ -314,17 +318,30 @@ static void setupWebServer() {
                 json += (char)data[i];
             }
 
-            int idx;
-            idx = json.indexOf("\"wifiSSID\":\"") + 12;
-            String newSsid = json.substring(idx, json.indexOf("\"", idx));
+            int idx1 = json.indexOf("\"wifiSSID\":\"");
+            int idx2 = json.indexOf("\"wifiPass\":\"");
+            if (idx1 != -1 && idx2 != -1) {
+                idx1 += 12;
+                String newSsid = json.substring(idx1, json.indexOf("\"", idx1));
+                idx2 += 12;
+                String newPass = json.substring(idx2, json.indexOf("\"", idx2));
 
-            idx = json.indexOf("\"wifiPass\":\"") + 12;
-            String newPass = json.substring(idx, json.indexOf("\"", idx));
+                request->send(200, "text/plain", "OK");
 
-            updateWifiConfig(newSsid, newPass);
-            request->send(200, "text/plain", "OK");
-            vTaskDelay(pdMS_TO_TICKS(2000));
-            ESP.restart();
+                struct WifiSaveArgs { String ssid; String pass; };
+                WifiSaveArgs *args = new WifiSaveArgs{newSsid, newPass};
+
+                xTaskCreate([](void *arg) {
+                    WifiSaveArgs *a = (WifiSaveArgs*)arg;
+                    updateWifiConfig(a->ssid, a->pass);
+                    delete a;
+                    vTaskDelay(pdMS_TO_TICKS(RESTART_DELAY_MS));
+                    postIncomingCommand(CMD_RESTART);
+                    vTaskDelete(NULL);
+                }, "save_wifi_task", 4096, args, 1, NULL);
+            } else {
+                request->send(400, "text/plain", "Invalid JSON Payload");
+            }
         }
     );
 
@@ -348,14 +365,17 @@ static void setupWebServer() {
     });
 
     // Endpoint: Reset Configuration to Defaults
-    server->on("/resetConfig", HTTP_GET, [](AsyncWebServerRequest *request) {
+    server->on("/resetConfig", HTTP_POST, [](AsyncWebServerRequest *request) {
         if (!request->authenticate(getWebUsername().c_str(), getWebPassword().c_str())) {
             return request->requestAuthentication();
         }
 
         request->send(200, "text/plain", "Configuration reset! Restarting with default settings...");
-        vTaskDelay(pdMS_TO_TICKS(2000));
-        postIncomingCommand(CMD_RESTART);
+        xTaskCreate([](void *arg) {
+            vTaskDelay(pdMS_TO_TICKS(RESTART_DELAY_MS));
+            postIncomingCommand(CMD_RESTART);
+            vTaskDelete(NULL); // Delete task itself (might be never run)
+        }, "deferred_restart", 2048, NULL, 1, NULL);
     });
 
     // Endpoint: Save GPIO Pin Configuration
@@ -371,13 +391,20 @@ static void setupWebServer() {
                 set_pin_name(i, request->getParam(paramName, true)->value());
             }
         }
-
-        pin_config_save();
-
         request->send(200, "text/plain", "OK");
-        vTaskDelay(pdMS_TO_TICKS(1000));
-        ESP.restart();
+        // Spawn a background task to save config to Flash and initiate system restart non-blockingly
+        xTaskCreate([](void *arg) {
+            // Save GPIO configuration to non-volatile storage
+            pin_config_save();
+            // Delay execution briefly to ensure HTTP response transmission completes
+            vTaskDelay(pdMS_TO_TICKS(RESTART_DELAY_MS));
+            // Post restart command to system queue
+            postIncomingCommand(CMD_RESTART);
+            // Delete current task to release allocated stack memory
+            vTaskDelete(NULL);
+        }, "save_restart_task", 4096, NULL, 1, NULL);
     });
+
     // Endpoint: Telemetry Data Retrieval
     server->on("/api/telemetry", HTTP_GET, [](AsyncWebServerRequest *request) {
         if (!request->authenticate(getWebUsername().c_str(), getWebPassword().c_str())) {
@@ -392,31 +419,81 @@ static void setupWebServer() {
     
     // Endpoint: OTA Firmware Upload Handler
     server->on("/doUpdate", HTTP_POST,
+        // =========================================================================
+        // 1. REQUEST HANDLER (Executes ONCE after the full file upload finishes)
+        // =========================================================================
         [](AsyncWebServerRequest *request) {
+            // Step 1.1: Verify HTTP Basic Authentication credentials.
+            // Returns 401 Unauthorized headers if authentication fails.
             if (!request->authenticate(getWebUsername().c_str(), getWebPassword().c_str())) {
                 return request->requestAuthentication();
             }
+
+            // Step 1.2: Check if any Flash write/verification errors occurred during data stream processing.
             bool success = !Update.hasError();
+
+            // Step 1.3: Build plain-text HTTP response payload ("OK" or "FAIL").
             AsyncWebServerResponse *response = request->beginResponse(200, "text/plain", success ? "OK" : "FAIL");
+            
+            // Instruct client to close TCP connection immediately after receiving response.
             response->addHeader("Connection", "close");
+            
+            // Transmit HTTP response back to client asynchronously.
             request->send(response);
-            vTaskDelay(pdMS_TO_TICKS(1000));
-            ESP.restart();
+
+            // Step 1.4: If update succeeded, schedule a non-blocking system restart via FreeRTOS Task.
+            if (success) {
+                xTaskCreate([](void *arg) {
+                    // Delay execution to allow AsyncWebServer enough time to flush HTTP response buffer to client.
+                    vTaskDelay(pdMS_TO_TICKS(OTA_RESTART_DELAY_MS));
+                    
+                    // Enqueue system restart command to main system task.
+                    postIncomingCommand(CMD_RESTART);
+                    
+                    // Self-terminate background task to prevent memory leak.
+                    vTaskDelete(NULL);
+                }, "ota_restart_task", 2048, NULL, 1, NULL);
+            }
         },
+
+        // =========================================================================
+        // 2. DATA UPLOAD CALLBACK (Executes MULTIPLE TIMES for each incoming data chunk)
+        // =========================================================================
         [](AsyncWebServerRequest *request, String filename, size_t index, uint8_t *data, size_t len, bool final) {
+            // Step 2.1: Secure raw binary data callback stream against unauthorized uploads.
+            if (!request->authenticate(getWebUsername().c_str(), getWebPassword().c_str())) {
+                return;
+            }
+
+            // Step 2.2: INITIALIZATION (Executes only for the first incoming data packet when index == 0).
             if (!index) {
-                Serial.printf("Update: %s\n", filename.c_str());
+                LOG_INFO("OTA Update started, filename: " + filename);
+
+                // Update.begin():
+                // 1. Identifies the inactive partition (e.g., ota_1) from partition table.
+                // 2. Erases target Flash partition range to prepare for writing incoming image.
                 if (!Update.begin(UPDATE_SIZE_UNKNOWN)) {
+                    LOG_ERROR("OTA Begin Error!");
                     Update.printError(Serial);
                 }
             }
+
+            // Step 2.3: FLASH WRITE (Executes for every incoming data packet chunk).
+            // Update.write(): Writes raw byte buffer directly into inactive Flash partition via SPI bus.
             if (Update.write(data, len) != len) {
+                LOG_ERROR("OTA Write Error!");
                 Update.printError(Serial);
             }
+
+            // Step 2.4: FINALIZATION (Executes only for the last packet of the file upload).
             if (final) {
+                // Update.end(true):
+                // 1. Verifies binary checksum/MD5 and image headers.
+                // 2. Writes new boot target marker into 'otadata' partition, setting inactive partition as active for next reboot.
                 if (Update.end(true)) {
-                    Serial.printf("Update Success: %u bytes\n", index + len);
+                    LOG_INFO("OTA Update Success! Written bytes: " + String(index + len));
                 } else {
+                    LOG_ERROR("OTA End Error!");
                     Update.printError(Serial);
                 }
             }

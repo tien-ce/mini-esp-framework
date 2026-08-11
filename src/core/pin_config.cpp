@@ -83,7 +83,6 @@ void pin_config_save(void) {
     }
     /* Save pin config and restart */
     save_config("pin_config", content);
-    postIncomingCommand(CMD_RESTART);
 }
 
 bool is_pin_used(int8_t gpio) {

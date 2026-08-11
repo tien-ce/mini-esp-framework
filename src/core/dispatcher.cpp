@@ -32,12 +32,12 @@ DEFINE_WEAK_XSNS(10)
 typedef bool (*XdrvFunc_t)(Signal_t);
 
 /* ----------------------- Static Variables ------------------------------*/
-static const XdrvFunc_t g_xdrv_table[NUM_DRIVERS] = {
+static XdrvFunc_t s_xdrv_table[NUM_DRIVERS] = {
     Xdrv1, Xdrv2, Xdrv3, Xdrv4, Xdrv5,
     Xdrv6, Xdrv7, Xdrv8, Xdrv9, Xdrv10
 };
 
-static const XdrvFunc_t g_xsns_table[NUM_SENSORS] = {
+static XdrvFunc_t s_xsns_table[NUM_SENSORS] = {
     Xsns1, Xsns2, Xsns3, Xsns4, Xsns5,
     Xsns6, Xsns7, Xsns8, Xsns9, Xsns10
 };
@@ -81,13 +81,13 @@ static void IRAM_ATTR on_dispatcher_timer(void* arg) {
  */
 static void execute_dispatch(Signal_t signal) {
     for (uint8_t i = 0; i < NUM_DRIVERS; i++) {
-        if (g_xdrv_table[i] != NULL) {
-            g_xdrv_table[i](signal);
+        if (s_xdrv_table[i] != NULL) {
+            s_xdrv_table[i](signal);
         }
     }
     for (uint8_t i = 0; i < NUM_SENSORS; i++) {
-        if (g_xsns_table[i] != NULL) {
-            g_xsns_table[i](signal);
+        if (s_xsns_table[i] != NULL) {
+            s_xsns_table[i](signal);
         }
     }
 }
@@ -97,7 +97,24 @@ static void execute_dispatch(Signal_t signal) {
  */
 static void vDispatcherTask(void *pvParameters) {
     uint32_t notified_bits = 0;
-    execute_dispatch(SIG_INIT); // Initial dispatch for all drivers
+    //execute_dispatch(SIG_INIT); // Initial dispatch for all drivers
+    for (uint8_t i = 0; i < NUM_DRIVERS; i++) {
+        if (s_xdrv_table[i] != NULL) {
+            // Check driver is set to run or not
+            bool is_initialized = s_xdrv_table[i](SIG_INIT);
+            if (!is_initialized)
+                s_xdrv_table[i] = NULL;
+        }
+    }
+
+    for (uint8_t i = 0; i < NUM_SENSORS; i++) {       
+        if (s_xsns_table[i] != NULL) {
+            // Check driver is set to run or not
+            bool is_initialized = s_xsns_table[i](SIG_INIT);
+            if (!is_initialized)
+                s_xsns_table[i] = NULL;
+        }
+    }
     for (;;) {
         /* Wait indefinitely for a notification, might be constain multiple set bits */
         if (xTaskNotifyWait(0x00, ULONG_MAX, &notified_bits, portMAX_DELAY) == pdTRUE) {
