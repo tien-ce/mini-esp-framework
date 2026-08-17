@@ -67,15 +67,13 @@ static bool CoreState_Init(void) {
     g_state_matrix.mqtt = MQTT_STATE_DISCONNECTED;
     g_state_matrix.storage_ok = false;
     g_state_matrix.last_update = xTaskGetTickCount();
-    // 3. Init config manager (loads registry list from LittleFS) for other modules to use
+    // 3. Init config manager (NVS / Preferences)
     config_manager_init();
-    // 4. Init pin config system (loads pin_config.txt from LittleFS)
+    // 4. Init pin config system (loads pin mappings from NVS)
     pin_config_init();
-    // 5. Rule engine init
-    rule_engine_init();
-    // 6. Init dispatcher
+    // 5. Init dispatcher
     dispatcher_init();
-    //broadcast MODBE_BOOT event
+    // Broadcast SYS_BOOT event
     CoreState_SetMode(SYS_BOOT);
     return true;
 }

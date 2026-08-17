@@ -17,11 +17,24 @@ void pin_config_init(void) {
         g_pin_names[i] = "";
     }
 
-    register_config_file("pin_config", "pin_config.txt");
-    String raw = read_config("pin_config");
+    register_config_module("pin_config", "pin_cfg");
 
-    if (raw.length() == 0) {
-        LOG_INFO("pin_config.txt empty or missing. Populating default pin mappings.");
+    bool has_saved_config = false;
+    if (config_get_lock()) {
+        for (int i = 0; i < MAX_GPIO_PINS; i++) {
+            String key = "gpio" + String(i);
+            if (config_has_key("pin_config", key)) {
+                g_pin_names[i] = config_read_string("pin_config", key, "");
+                if (g_pin_names[i].length() > 0) {
+                    has_saved_config = true;
+                }
+            }
+        }
+        config_release_lock();
+    }
+
+    if (!has_saved_config) {
+        LOG_INFO("Pin config missing in NVS. Populating default pin mappings.");
         
         // 1. Iterate through predefined board pin definitions and assign non-None defaults to RAM table
         for (size_t i = 0; i < BOARD_PIN_COUNT; i++) {
@@ -31,58 +44,22 @@ void pin_config_init(void) {
             }
         }
         
-        // 2. Format assigned default pin configurations into "GPIOx: name" line entries
-        String content = "";
-        for (int i = 0; i < MAX_GPIO_PINS; i++) {
-            if (g_pin_names[i].length() > 0) {
-                content += "GPIO" + String(i) + ": " + g_pin_names[i] + "\n";
-            }
-        }
-        
-        // 3. Save default pin configuration to pin_config.txt on LittleFS
-        if (content.length() > 0) {
-            save_config("pin_config", content);
-        }
+        // 2. Save default pin configuration to NVS
+        pin_config_save();
         return;
     }
 
-
-    int pos = 0;
-    while (pos < raw.length()) {
-        int nextPos = raw.indexOf('\n', pos);
-        if (nextPos == -1) nextPos = raw.length();
-        String line = raw.substring(pos, nextPos);
-        line.trim();
-        pos = nextPos + 1;
-
-        if (line.length() == 0) continue;
-
-        // Parse line format: "GPIO<number>: <name>" (e.g., "GPIO47: RELAY")
-        if (line.startsWith("GPIO")) {
-
-            int colonIdx = line.indexOf(':');
-            if (colonIdx > 4) {
-                int gpio_num = line.substring(4, colonIdx).toInt();
-                String name = line.substring(colonIdx + 1);
-                name.trim();
-
-                if (gpio_num >= 0 && gpio_num < MAX_GPIO_PINS) {
-                    g_pin_names[gpio_num] = name;
-                }
-            }
-        }
-    }
+    LOG_INFO("Pin config loaded from NVS successfully.");
 }
 
 void pin_config_save(void) {
-    String content = "";
-    for (int i = 0; i < MAX_GPIO_PINS; i++) {
-        if (g_pin_names[i].length() > 0) {
-            content += "GPIO" + String(i) + ": " + g_pin_names[i] + "\n";
+    if (config_get_lock()) {
+        for (int i = 0; i < MAX_GPIO_PINS; i++) {
+            String key = "gpio" + String(i);
+            config_save_string("pin_config", key, g_pin_names[i]);
         }
+        config_release_lock();
     }
-    /* Save pin config and restart */
-    save_config("pin_config", content);
 }
 
 bool is_pin_used(int8_t gpio) {

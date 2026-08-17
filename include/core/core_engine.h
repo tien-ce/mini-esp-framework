@@ -10,7 +10,6 @@
 #include "core/info.h"
 #include "core/pin_config.h"
 #include "core/mqtt_task.h"
-#include "core/rule_engine.h"
 // ============================================================================
 // 1. DOMAIN-SPECIFIC STATE ENUMERATIONS
 // ============================================================================

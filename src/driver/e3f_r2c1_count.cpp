@@ -88,71 +88,36 @@ static void initSensorMutex() {
 }
 
 /**
- * @brief Saves sensor driver configuration parameters to LittleFS.
+ * @brief Saves sensor driver configuration parameters to NVS.
  */
 static void saveSensorConfig() {
     initSensorMutex();
-    String content = "";
-    // Read local variables to build payload, no lock required for simple string concatenation copy
-    content += "clientId=" + sensor_client_id + "\n";
-    content += "apiUrl=" + sensor_api_url + "\n";    
-    save_config("sensor_driver", content);
+    if (configMutex != NULL && xSemaphoreTake(configMutex, portMAX_DELAY) == pdTRUE) {
+        if (config_get_lock()) {
+            config_save_string("sensor_driver", "clientId", sensor_client_id);
+            config_save_string("sensor_driver", "apiUrl", sensor_api_url);
+            config_release_lock();
+        }
+        xSemaphoreGive(configMutex);
+    }
 }
 
 /**
- * @brief Loads sensor driver configuration parameters from LittleFS.
+ * @brief Loads sensor driver configuration parameters from NVS.
  */
 static void loadSensorConfig() {
     initSensorMutex();
-    register_config_file("sensor_driver", "sensor_config.txt");
-    String raw = read_config("sensor_driver");
-    
-    if (raw.length() == 0) {
-        LOG_INFO("Sensor config file not found or empty. Creating default sensor_config.txt");
-        if (configMutex != NULL && xSemaphoreTake(configMutex, portMAX_DELAY) == pdTRUE) {
-            sensor_client_id = E3FR2C1_COUNT_CLIENT_ID;
-            sensor_api_url = E3FR2C1_COUNT_API_URL;
-            xSemaphoreGive(configMutex);
-        }
-        saveSensorConfig();
-        return;
-    }
+    register_config_module("sensor_driver", "sensor_drv");
 
-    String tempClientId = "";
-    String tempApiUrl = "";
-
-    int pos = 0;
-    while (pos < raw.length()) {
-        int nextPos = raw.indexOf('\n', pos);
-        if (nextPos == -1) nextPos = raw.length();
-        String line = raw.substring(pos, nextPos);
-        line.trim();
-        pos = nextPos + 1;
-
-        if (line.length() == 0) continue;
-        int eqIdx = line.indexOf('=');
-        if (eqIdx > 0) {
-            String key = line.substring(0, eqIdx);
-            String val = line.substring(eqIdx + 1);
-            key.trim();
-            val.trim();
-
-            if (key.equalsIgnoreCase("clientId")) {
-                tempClientId = val;
-            } else if (key.equalsIgnoreCase("apiUrl")) {
-                tempApiUrl = val;
-            }
-        }
-    }
-
-    // Write parsed configuration under mutex protection
     if (configMutex != NULL && xSemaphoreTake(configMutex, portMAX_DELAY) == pdTRUE) {
-        sensor_client_id = tempClientId;
-        sensor_api_url = tempApiUrl;
+        if (config_get_lock()) {
+            sensor_client_id = config_read_string("sensor_driver", "clientId", E3FR2C1_COUNT_CLIENT_ID);
+            sensor_api_url = config_read_string("sensor_driver", "apiUrl", E3FR2C1_COUNT_API_URL);
+            config_release_lock();
+        }
         xSemaphoreGive(configMutex);
     }
-
-    LOG_INFO("Sensor config loaded successfully.");
+    LOG_INFO("Sensor config loaded from NVS successfully.");
 }
 
 /**
@@ -313,6 +278,5 @@ void initSensorTasks() {
     //    1
     //);
 }
-
 #endif // USE_E3FR2C1_COUNT
 

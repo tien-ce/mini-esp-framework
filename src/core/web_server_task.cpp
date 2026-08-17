@@ -29,13 +29,14 @@
 static uint16_t web_port      = 0;
 static String web_username    = "";
 static String web_password    = "";
-static AsyncWebServer *server= NULL;
+static AsyncWebServer *server = NULL;
 static SemaphoreHandle_t webConfigMutex = NULL;
 /* For register rows in table*/
-static String tableRowsHTML="";
+static String tableRowsHTML = "";
 /* Buffer dynamic JSON for HTTP Polling responses */
 static JsonDocument telemetryDoc;
 static String telemetryJson = "{}";
+
 /* -------------------------------------------------------------------------- */
 /*                              GLOBAL VARIABLES                              */
 /* -------------------------------------------------------------------------- */
@@ -95,13 +96,11 @@ static String generatePinRows() {
                 rows += "<option value='" + String(optName) + "'" + selectedAttr + ">" + String(optName) + "</option>";
             }
 
-            
             rows += "</select></div>";
         }
     }
     return rows;
 }
-
 
 /** @brief Renders HTML templates by replacing placeholders. */
 static String renderTemplate(const char* templateStr) {
@@ -127,15 +126,382 @@ static String renderTemplate(const char* templateStr) {
     return page;
 }
 
-/** * @brief Clears the telemetry JSON data.*/
+/** @brief Clears the telemetry JSON data. */
 static void clearTelemetryJson() {
     telemetryJson = "{}";
     telemetryDoc.clear();
 }
 
-/** @brief WebSocket event handler for /ws terminal console endpoint. */
+/**
+ * @brief Saves current in-memory web server configuration parameters to NVS.
+ */
+static void saveWebConfig() {
+    if (webConfigMutex != NULL && xSemaphoreTake(webConfigMutex, portMAX_DELAY) == pdTRUE) {
+        if (config_get_lock()) {
+            config_save_int("web", "port", web_port);
+            config_save_string("web", "username", web_username);
+            config_save_string("web", "password", web_password);
+            config_release_lock();
+        }
+        xSemaphoreGive(webConfigMutex);
+    }
+}
+
+/**
+ * @brief Loads web server configuration from NVS.
+ */
+static void loadWebConfig() {
+    initWebMutex();
+    register_config_module("web", "web");
+
+    if (webConfigMutex != NULL && xSemaphoreTake(webConfigMutex, portMAX_DELAY) == pdTRUE) {
+        if (config_get_lock()) {
+            web_port = (uint16_t)config_read_int("web", "port", WEB_PORT);
+            web_username = config_read_string("web", "username", WEB_USERNAME);
+            web_password = config_read_string("web", "password", WEB_PASSWORD);
+            config_release_lock();
+        }
+        xSemaphoreGive(webConfigMutex);
+    }
+    LOG_INFO("web config loaded from NVS successfully.");
+}
+
+/* ---------------- web server call back----------------- */
+
+/**
+ * @brief Handles HTTP GET request for the root dashboard URL ("/").
+ * Authenticates user credentials and sends the rendered main dashboard HTML.
+ */
+static void handleRoot(AsyncWebServerRequest *request) {
+    if (!request->authenticate(getWebUsername().c_str(), getWebPassword().c_str())) {
+        return request->requestAuthentication();
+    }
+    request->send(200, "text/html", renderTemplate(MAIN_HTML));
+}
+
+/**
+ * @brief Handles HTTP GET request for the system information page ("/info").
+ * Authenticates user and responds with the rendered system info HTML page.
+ */
+static void handleInfo(AsyncWebServerRequest *request) {
+    if (!request->authenticate(getWebUsername().c_str(), getWebPassword().c_str())) {
+        return request->requestAuthentication();
+    }
+    request->send(200, "text/html", renderTemplate(INFO_HTML));
+}
+
+/**
+ * @brief Handles HTTP GET request for the tools page ("/tools").
+ * Authenticates user and serves the tools overview HTML interface.
+ */
+static void handleTools(AsyncWebServerRequest *request) {
+    if (!request->authenticate(getWebUsername().c_str(), getWebPassword().c_str())) {
+        return request->requestAuthentication();
+    }
+    request->send(200, "text/html", renderTemplate(TOOLS_HTML));
+}
+
+/**
+ * @brief Handles HTTP GET request for the LittleFS file system manager ("/tools/manage_file_system").
+ * Authenticates user and serves the file system management HTML page.
+ */
+static void handleManageFileSystem(AsyncWebServerRequest *request) {
+    if (!request->authenticate(getWebUsername().c_str(), getWebPassword().c_str())) {
+        return request->requestAuthentication();
+    }
+    request->send(200, "text/html", renderTemplate(MANAGE_FILE_SYSTEM_HTML));
+}
+
+/**
+ * @brief Handles HTTP GET request for the web console terminal ("/console").
+ * Authenticates user and serves the interactive serial/web console HTML interface.
+ */
+static void handleConsole(AsyncWebServerRequest *request) {
+    if (!request->authenticate(getWebUsername().c_str(), getWebPassword().c_str())) {
+        return request->requestAuthentication();
+    }
+    request->send(200, "text/html", renderTemplate(CONSOLE_HTML));
+}
+
+/**
+ * @brief Handles HTTP GET request for the firmware upgrade page ("/ota").
+ * Authenticates user and serves the OTA firmware upload HTML page.
+ */
+static void handleOta(AsyncWebServerRequest *request) {
+    if (!request->authenticate(getWebUsername().c_str(), getWebPassword().c_str())) {
+        return request->requestAuthentication();
+    }
+    request->send(200, "text/html", renderTemplate(OTA_HTML));
+}
+
+/**
+ * @brief Handles HTTP GET request for the general configuration page ("/config").
+ * Authenticates user and serves the WiFi/network settings HTML page.
+ */
+static void handleConfig(AsyncWebServerRequest *request) {
+    if (!request->authenticate(getWebUsername().c_str(), getWebPassword().c_str())) {
+        return request->requestAuthentication();
+    }
+    request->send(200, "text/html", renderTemplate(CONFIG_HTML));
+}
+
+/**
+ * @brief Handles HTTP GET request for the GPIO pin mapping configuration page ("/config-module").
+ * Authenticates user and serves the module pin configuration HTML page.
+ */
+static void handleConfigModule(AsyncWebServerRequest *request) {
+    if (!request->authenticate(getWebUsername().c_str(), getWebPassword().c_str())) {
+        return request->requestAuthentication();
+    }
+    request->send(200, "text/html", renderTemplate(CONFIG_MODULE_HTML));
+}
+
+/**
+ * @brief Fallback handler for unmapped routes and 404 errors.
+ * Logs the unhandled URL to Serial and responds with HTTP 404 Not Found.
+ */
+static void handleNotFound(AsyncWebServerRequest *request) {
+    Serial.printf("[Web Error] Not Found / Internal error on URL: %s\n", request->url().c_str());
+    request->send(404, "text/plain", "Not found");
+}
+
+/**
+ * @brief Handles HTTP GET request for retrieving current WiFi credentials ("/getConfig").
+ * Authenticates user and responds with JSON containing current WiFi SSID and password.
+ */
+static void handleGetConfig(AsyncWebServerRequest *request) {
+    if (!request->authenticate(getWebUsername().c_str(), getWebPassword().c_str())) {
+        return request->requestAuthentication();
+    }
+
+    String json = "{";
+    json += "\"wifiSSID\":\"" + getWifiSSID() + "\",";
+    json += "\"wifiPass\":\"" + getWifiPassword() + "\"";
+    json += "}";
+    request->send(200, "application/json", json);
+}
+
+/**
+ * @brief Handles HTTP POST request headers for saving WiFi credentials ("/saveConfig").
+ * Placeholder callback required by AsyncWebServer before handling body payload.
+ */
+static void handleSaveConfigRequest(AsyncWebServerRequest *request) {
+    // Request processing is deferred to handleSaveConfigBody once body payload is received
+}
+
+/**
+ * @brief Handles HTTP POST body data containing new WiFi credentials in JSON format ("/saveConfig").
+ * Parses SSID and password, replies OK, and spawns a background task to update config and restart.
+ */
+static void handleSaveConfigBody(AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total) {
+    if (!request->authenticate(getWebUsername().c_str(), getWebPassword().c_str())) {
+        return request->requestAuthentication();
+    }
+
+    String json = "";
+    for (size_t i = 0; i < len; i++) {
+        json += (char)data[i];
+    }
+
+    int idx1 = json.indexOf("\"wifiSSID\":\"");
+    int idx2 = json.indexOf("\"wifiPass\":\"");
+    if (idx1 != -1 && idx2 != -1) {
+        idx1 += 12;
+        String newSsid = json.substring(idx1, json.indexOf("\"", idx1));
+        idx2 += 12;
+        String newPass = json.substring(idx2, json.indexOf("\"", idx2));
+
+        request->send(200, "text/plain", "OK");
+
+        struct WifiSaveArgs { String ssid; String pass; };
+        WifiSaveArgs *args = new WifiSaveArgs{newSsid, newPass};
+
+        // Create background task to save WiFi credentials and trigger deferred system restart
+        xTaskCreate([](void *arg) {
+            WifiSaveArgs *a = (WifiSaveArgs*)arg;
+            updateWifiConfig(a->ssid, a->pass);
+            delete a;
+            vTaskDelay(pdMS_TO_TICKS(RESTART_DELAY_MS));
+            postIncomingCommand(CMD_RESTART);
+            vTaskDelete(NULL);
+        }, "save_wifi_task", 4096, args, 1, NULL);
+    } else {
+        request->send(400, "text/plain", "Invalid JSON Payload");
+    }
+}
+
+/**
+ * @brief Handles HTTP GET request for command execution ("/cmd").
+ * Extracts the 'msg' query parameter and posts the incoming command into system queue.
+ */
+static void handleCmd(AsyncWebServerRequest *request) {
+    if (!request->authenticate(getWebUsername().c_str(), getWebPassword().c_str())) {
+        return request->requestAuthentication();
+    }
+
+    if (request->hasParam("msg")) {
+        String cmd = request->getParam("msg")->value();
+        cmd.trim();
+        if (cmd.length() > 0) {
+            postIncomingCommand(cmd);
+        }
+
+        request->send(200, "text/plain", "Command queued: " + cmd);
+    } else {
+        request->send(400, "text/plain", "Missing msg parameter");
+    }
+}
+
+/**
+ * @brief Handles HTTP POST request to reboot the device ("/restart").
+ * Sends an acknowledgment response and creates a FreeRTOS task to trigger system restart.
+ */
+static void handleRestart(AsyncWebServerRequest *request) {
+    if (!request->authenticate(getWebUsername().c_str(), getWebPassword().c_str())) {
+        return request->requestAuthentication();
+    }
+
+    request->send(200, "text/plain", "Restarting device...");
+    xTaskCreate([](void *arg) {
+        vTaskDelay(pdMS_TO_TICKS(RESTART_DELAY_MS));
+        postIncomingCommand(CMD_RESTART);
+        vTaskDelete(NULL); // Delete task itself
+    }, "deferred_restart", 2048, NULL, 1, NULL);
+}
+
+/**
+ * @brief Handles HTTP POST request to save module GPIO pin configuration ("/saveModule").
+ * Extracts pin assignments from request parameters, saves to flash, and restarts device.
+ */
+static void handleSaveModule(AsyncWebServerRequest *request) {
+    if (!request->authenticate(getWebUsername().c_str(), getWebPassword().c_str())) {
+        return request->requestAuthentication();
+    }
+
+    for (int i = 0; i < MAX_GPIO_PINS; i++) {
+        String paramName = "gpio" + String(i);
+        // Check if the parameter exists in the request and update the pin name accordingly
+        if (request->hasParam(paramName, true)) {
+            set_pin_name(i, request->getParam(paramName, true)->value());
+        }
+    }
+    request->send(200, "text/plain", "OK");
+    // Spawn a background task to save config to Flash and initiate system restart non-blockingly
+    xTaskCreate([](void *arg) {
+        // Save GPIO configuration to non-volatile storage
+        pin_config_save();
+        // Delay execution briefly to ensure HTTP response transmission completes
+        vTaskDelay(pdMS_TO_TICKS(RESTART_DELAY_MS));
+        // Post restart command to system queue
+        postIncomingCommand(CMD_RESTART);
+        // Delete current task to release allocated stack memory
+        vTaskDelete(NULL);
+    }, "save_restart_task", 4096, NULL, 1, NULL);
+}
+
+/**
+ * @brief Handles HTTP GET request for sensor telemetry data ("/api/telemetry").
+ * Triggers telemetry signal, responds with buffered telemetry JSON, and clears buffer.
+ */
+static void handleTelemetry(AsyncWebServerRequest *request) {
+    if (!request->authenticate(getWebUsername().c_str(), getWebPassword().c_str())) {
+        return request->requestAuthentication();
+    }
+    // Trigger telemetry data update before sending
+    dispatch_signal(SIG_WEB_POLL); 
+    request->send(200, "application/json", telemetryJson);
+    // Clear telemetryJson after sending to prepare for next update
+    clearTelemetryJson();
+}
+
+/**
+ * @brief Handles the final response for OTA firmware update ("/doUpdate").
+ * Verifies upload result, returns HTTP 200 with OK/FAIL, and schedules reboot on success.
+ */
+static void handleOtaUpdateRequest(AsyncWebServerRequest *request) {
+    // Step 1: Verify HTTP Basic Authentication credentials.
+    // Returns 401 Unauthorized headers if authentication fails.
+    if (!request->authenticate(getWebUsername().c_str(), getWebPassword().c_str())) {
+        return request->requestAuthentication();
+    }
+
+    // Step 2: Check if any Flash write/verification errors occurred during data stream processing.
+    bool success = !Update.hasError();
+
+    // Step 3: Build plain-text HTTP response payload ("OK" or "FAIL").
+    AsyncWebServerResponse *response = request->beginResponse(200, "text/plain", success ? "OK" : "FAIL");
+    
+    // Instruct client to close TCP connection immediately after receiving response.
+    response->addHeader("Connection", "close");
+    
+    // Transmit HTTP response back to client asynchronously.
+    request->send(response);
+
+    // Step 4: If update succeeded, schedule a non-blocking system restart via FreeRTOS Task.
+    if (success) {
+        xTaskCreate([](void *arg) {
+            // Delay execution to allow AsyncWebServer enough time to flush HTTP response buffer to client.
+            vTaskDelay(pdMS_TO_TICKS(OTA_RESTART_DELAY_MS));
+            
+            // Enqueue system restart command to main system task.
+            postIncomingCommand(CMD_RESTART);
+            
+            // Self-terminate background task to prevent memory leak.
+            vTaskDelete(NULL);
+        }, "ota_restart_task", 2048, NULL, 1, NULL);
+    }
+}
+
+/**
+ * @brief Handles streaming chunks of binary firmware data during OTA update ("/doUpdate").
+ * Initializes OTA partition, writes incoming data chunks to Flash, and verifies on completion.
+ */
+static void handleOtaUpload(AsyncWebServerRequest *request, String filename, size_t index, uint8_t *data, size_t len, bool final) {
+    // Step 1: Secure raw binary data callback stream against unauthorized uploads.
+    if (!request->authenticate(getWebUsername().c_str(), getWebPassword().c_str())) {
+        return;
+    }
+
+    // Step 2: INITIALIZATION (Executes only for the first incoming data packet when index == 0).
+    if (!index) {
+        LOG_INFO("OTA Update started, filename: " + filename);
+
+        // Update.begin():
+        // 1. Identifies the inactive partition (e.g., ota_1) from partition table.
+        // 2. Erases target Flash partition range to prepare for writing incoming image.
+        if (!Update.begin(UPDATE_SIZE_UNKNOWN)) {
+            LOG_ERROR("OTA Begin Error!");
+            Update.printError(Serial);
+        }
+    }
+
+    // Step 3: FLASH WRITE (Executes for every incoming data packet chunk).
+    // Update.write(): Writes raw byte buffer directly into inactive Flash partition via SPI bus.
+    if (Update.write(data, len) != len) {
+        LOG_ERROR("OTA Write Error!");
+        Update.printError(Serial);
+    }
+
+    // Step 4: FINALIZATION (Executes only for the last packet of the file upload).
+    if (final) {
+        // Update.end(true):
+        // 1. Verifies binary checksum/MD5 and image headers.
+        // 2. Writes new boot target marker into 'otadata' partition, setting inactive partition as active for next reboot.
+        if (Update.end(true)) {
+            LOG_INFO("OTA Update Success! Written bytes: " + String(index + len));
+        } else {
+            LOG_ERROR("OTA End Error!");
+            Update.printError(Serial);
+        }
+    }
+}
+
+/**
+ * @brief WebSocket event handler for "/ws" terminal console endpoint.
+ * Handles client connection, disconnection, and incoming text commands.
+ */
 static void onWsEvent(AsyncWebSocket *server, AsyncWebSocketClient *client, AwsEventType type,
-               void *arg, uint8_t *data, size_t len){
+               void *arg, uint8_t *data, size_t len) {
     if (type == WS_EVT_CONNECT) {
         Serial.printf("WebSocket client #%u connected\n", client->id());
         client->text("=== Sensor Monitor Connected ===");
@@ -157,357 +523,47 @@ static void onWsEvent(AsyncWebSocket *server, AsyncWebSocketClient *client, AwsE
 }
 
 /**
- * @brief Saves current in-memory web server configuration parameters to LittleFS.
- */
-static void saveWebConfig() {
-    String content = "";
-    if (webConfigMutex != NULL && xSemaphoreTake(webConfigMutex, portMAX_DELAY) == pdTRUE) {
-        content += "port=" + String(web_port) + "\n";
-        content += "username=" + web_username + "\n";
-        content += "password=" + web_password + "\n";
-        xSemaphoreGive(webConfigMutex);
-    }
-    save_config("web", content);
-}
-
-/**
- * @brief Loads web server configuration from LittleFS web_config.txt file.
- */
-static void loadWebConfig() {
-    register_config_file("web", "web_config.txt");
-    initWebMutex();
-
-    String raw = read_config("web");
-    if (raw.length() == 0) {
-        LOG_INFO("web config file not found or empty. creating default web_config.txt");
-		web_username = WEB_USERNAME;
-		web_password = WEB_PASSWORD;
-		web_port = WEB_PORT;
-        saveWebConfig();
-        return;
-    }
-
-    int pos = 0;
-    while (pos < raw.length()) {
-        int nextpos = raw.indexOf('\n', pos);
-        if (nextpos == -1) nextpos = raw.length();
-        String line = raw.substring(pos, nextpos);
-        line.trim();
-        pos = nextpos + 1;
-
-        if (line.length() == 0) continue;
-        int eqidx = line.indexOf('=');
-        if (eqidx > 0) {
-            String key = line.substring(0, eqidx);
-            String val = line.substring(eqidx + 1);
-            key.trim();
-            val.trim();
-            if (key.equalsIgnoreCase("port")) {
-                web_port = (uint16_t)val.toInt();
-            } else if (key.equalsIgnoreCase("username")) {
-                web_username = val;
-            } else if (key.equalsIgnoreCase("password")) {
-                web_password = val;
-            }
-        }
-    }
-    LOG_INFO("web config loaded successfully.");
-}
-
-/**
  * @brief Configures AsyncWebServer endpoints, WebSocket handlers, and authentication.
  */
 static void setupWebServer() {
-	uint16_t port = getWebPort();
-	if (server != NULL) {
-		LOG_INFO("Cleaning up old server instance...");
-		delete server;
-		server = NULL;
-	}
+    uint16_t port = getWebPort();
+    if (server != NULL) {
+        LOG_INFO("Cleaning up old server instance...");
+        delete server;
+        server = NULL;
+    }
     DefaultHeaders::Instance().addHeader("Access-Control-Allow-Origin", "*");
     DefaultHeaders::Instance().addHeader("Access-Control-Allow-Headers", "Authorization, Content-Type");
     server = new AsyncWebServer(port);
+
     // WebSocket Setup
     ws.setAuthentication(getWebUsername().c_str(), getWebPassword().c_str());
     ws.onEvent(onWsEvent);
     server->addHandler(&ws);
-    // wsHome.onEvent(onHomeWsEvent);
-    // server->addHandler(&wsHome);
-    // Page 1: Main Menu UI
-    server->on("/", HTTP_GET, [](AsyncWebServerRequest *request) {
-        if (!request->authenticate(getWebUsername().c_str(), getWebPassword().c_str())) {
-            return request->requestAuthentication();
-        }
-        request->send(200, "text/html", renderTemplate(MAIN_HTML));
-    });
 
-    // Page 2: Information UI
-    server->on("/info", HTTP_GET, [](AsyncWebServerRequest *request) {
-        if (!request->authenticate(getWebUsername().c_str(), getWebPassword().c_str())) {
-            return request->requestAuthentication();
-        }
-        request->send(200, "text/html", renderTemplate(INFO_HTML));
-    });
+    // Page Routes
+    server->on("/", HTTP_GET, handleRoot);
+    server->on("/info", HTTP_GET, handleInfo);
+    server->on("/tools", HTTP_GET, handleTools);
+    server->on("/tools/manage_file_system", HTTP_GET, handleManageFileSystem);
+    server->on("/console", HTTP_GET, handleConsole);
+    server->on("/ota", HTTP_GET, handleOta);
+    server->on("/config", HTTP_GET, handleConfig);
+    server->on("/config-module", HTTP_GET, handleConfigModule);
 
-    // Page 3: Tools UI
-    server->on("/tools", HTTP_GET, [](AsyncWebServerRequest *request) {
-        if (!request->authenticate(getWebUsername().c_str(), getWebPassword().c_str())) {
-            return request->requestAuthentication();
-        }
-        request->send(200, "text/html", renderTemplate(TOOLS_HTML));
-    });
+    // Fallback 404 Route
+    server->onNotFound(handleNotFound);
 
-    // Page 3.1: Manage File System UI
-    server->on("/tools/manage_file_system", HTTP_GET, [](AsyncWebServerRequest *request) {
-        if (!request->authenticate(getWebUsername().c_str(), getWebPassword().c_str())) {
-            return request->requestAuthentication();
-        }
-        request->send(200, "text/html", renderTemplate(MANAGE_FILE_SYSTEM_HTML));
-    });
+    // REST API & Action Endpoints
+    server->on("/getConfig", HTTP_GET, handleGetConfig);
+    server->on("/saveConfig", HTTP_POST, handleSaveConfigRequest, NULL, handleSaveConfigBody);
+    server->on("/cmd", HTTP_GET, handleCmd);
+    server->on("/restart", HTTP_POST, handleRestart);
+    server->on("/saveModule", HTTP_POST, handleSaveModule);
+    server->on("/api/telemetry", HTTP_GET, handleTelemetry);
 
-    // Page 4: Console UI
-    server->on("/console", HTTP_GET, [](AsyncWebServerRequest *request) {
-        if (!request->authenticate(getWebUsername().c_str(), getWebPassword().c_str())) {
-            return request->requestAuthentication();
-        }
-        request->send(200, "text/html", renderTemplate(CONSOLE_HTML));
-    });
-
-    // Page 5: Firmware Upgrade UI
-    server->on("/ota", HTTP_GET, [](AsyncWebServerRequest *request) {
-        if (!request->authenticate(getWebUsername().c_str(), getWebPassword().c_str())) {
-            return request->requestAuthentication();
-        }
-        request->send(200, "text/html", renderTemplate(OTA_HTML));
-    });
-
-    // Page 6: Configuration UI
-    server->on("/config", HTTP_GET, [](AsyncWebServerRequest *request) {
-        if (!request->authenticate(getWebUsername().c_str(), getWebPassword().c_str())) {
-            return request->requestAuthentication();
-        }
-        request->send(200, "text/html", renderTemplate(CONFIG_HTML));
-    });
-
-    // Page 7: Configuration Module UI
-    server->on("/config-module", HTTP_GET, [](AsyncWebServerRequest *request) {
-        if (!request->authenticate(getWebUsername().c_str(), getWebPassword().c_str())) {
-            return request->requestAuthentication();
-        }
-        request->send(200, "text/html", renderTemplate(CONFIG_MODULE_HTML));
-    });
-    
-    server->onNotFound([](AsyncWebServerRequest *request) {
-        Serial.printf("[Web Error] Not Found / Internal error on URL: %s\n", request->url().c_str());
-        request->send(404, "text/plain", "Not found");
-    });
-
-    // Endpoint: Retrieve Device Configuration
-    server->on("/getConfig", HTTP_GET, [](AsyncWebServerRequest *request) {
-        if (!request->authenticate(getWebUsername().c_str(), getWebPassword().c_str())) {
-            return request->requestAuthentication();
-        }
-
-        String json = "{";
-        json += "\"wifiSSID\":\"" + getWifiSSID() + "\",";
-        json += "\"wifiPass\":\"" + getWifiPassword() + "\"";
-        json += "}";
-        request->send(200, "application/json", json);
-    });
-
-    // Endpoint: Update Device Configuration
-    server->on("/saveConfig", HTTP_POST, [](AsyncWebServerRequest *request) {}, NULL,
-        [](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total) {
-            if (!request->authenticate(getWebUsername().c_str(), getWebPassword().c_str())) {
-                return request->requestAuthentication();
-            }
-
-            String json = "";
-            for (size_t i = 0; i < len; i++) {
-                json += (char)data[i];
-            }
-
-            int idx1 = json.indexOf("\"wifiSSID\":\"");
-            int idx2 = json.indexOf("\"wifiPass\":\"");
-            if (idx1 != -1 && idx2 != -1) {
-                idx1 += 12;
-                String newSsid = json.substring(idx1, json.indexOf("\"", idx1));
-                idx2 += 12;
-                String newPass = json.substring(idx2, json.indexOf("\"", idx2));
-
-                request->send(200, "text/plain", "OK");
-
-                struct WifiSaveArgs { String ssid; String pass; };
-                WifiSaveArgs *args = new WifiSaveArgs{newSsid, newPass};
-
-                xTaskCreate([](void *arg) {
-                    WifiSaveArgs *a = (WifiSaveArgs*)arg;
-                    updateWifiConfig(a->ssid, a->pass);
-                    delete a;
-                    vTaskDelay(pdMS_TO_TICKS(RESTART_DELAY_MS));
-                    postIncomingCommand(CMD_RESTART);
-                    vTaskDelete(NULL);
-                }, "save_wifi_task", 4096, args, 1, NULL);
-            } else {
-                request->send(400, "text/plain", "Invalid JSON Payload");
-            }
-        }
-    );
-
-    // Endpoint: Execute System Commands
-    server->on("/cmd", HTTP_GET, [](AsyncWebServerRequest *request) {
-        if (!request->authenticate(getWebUsername().c_str(), getWebPassword().c_str())) {
-            return request->requestAuthentication();
-        }
-
-        if (request->hasParam("msg")) {
-            String cmd = request->getParam("msg")->value();
-            cmd.trim();
-            if (cmd.length() > 0) {
-                postIncomingCommand(cmd);
-            }
-
-            request->send(200, "text/plain", "Command queued: " + cmd);
-        } else {
-            request->send(400, "text/plain", "Missing msg parameter");
-        }
-    });
-
-    // Endpoint: Reboot System Device
-    server->on("/restart", HTTP_POST, [](AsyncWebServerRequest *request) {
-        if (!request->authenticate(getWebUsername().c_str(), getWebPassword().c_str())) {
-            return request->requestAuthentication();
-        }
-
-        request->send(200, "text/plain", "Restarting device...");
-        xTaskCreate([](void *arg) {
-            vTaskDelay(pdMS_TO_TICKS(RESTART_DELAY_MS));
-            postIncomingCommand(CMD_RESTART);
-            vTaskDelete(NULL); // Delete task itself
-        }, "deferred_restart", 2048, NULL, 1, NULL);
-    });
-
-    // Endpoint: Save GPIO Pin Configuration
-    server->on("/saveModule", HTTP_POST, [](AsyncWebServerRequest *request) {
-        if (!request->authenticate(getWebUsername().c_str(), getWebPassword().c_str())) {
-            return request->requestAuthentication();
-        }
-
-        for (int i = 0; i < MAX_GPIO_PINS; i++) {
-            String paramName = "gpio" + String(i);
-            // Check if the parameter exists in the request and update the pin name accordingly
-            if (request->hasParam(paramName, true)) {
-                set_pin_name(i, request->getParam(paramName, true)->value());
-            }
-        }
-        request->send(200, "text/plain", "OK");
-        // Spawn a background task to save config to Flash and initiate system restart non-blockingly
-        xTaskCreate([](void *arg) {
-            // Save GPIO configuration to non-volatile storage
-            pin_config_save();
-            // Delay execution briefly to ensure HTTP response transmission completes
-            vTaskDelay(pdMS_TO_TICKS(RESTART_DELAY_MS));
-            // Post restart command to system queue
-            postIncomingCommand(CMD_RESTART);
-            // Delete current task to release allocated stack memory
-            vTaskDelete(NULL);
-        }, "save_restart_task", 4096, NULL, 1, NULL);
-    });
-
-    // Endpoint: Telemetry Data Retrieval
-    server->on("/api/telemetry", HTTP_GET, [](AsyncWebServerRequest *request) {
-        if (!request->authenticate(getWebUsername().c_str(), getWebPassword().c_str())) {
-            return request->requestAuthentication();
-        }
-        // Trigger telemetry data update before sending
-        dispatch_signal(SIG_WEB_POLL); 
-        request->send(200, "application/json", telemetryJson);
-        // Clear telemetryJson after sending to prepare for next update
-        clearTelemetryJson();
-    });
-    
-    // Endpoint: OTA Firmware Upload Handler
-    server->on("/doUpdate", HTTP_POST,
-        // =========================================================================
-        // 1. REQUEST HANDLER (Executes ONCE after the full file upload finishes)
-        // =========================================================================
-        [](AsyncWebServerRequest *request) {
-            // Step 1.1: Verify HTTP Basic Authentication credentials.
-            // Returns 401 Unauthorized headers if authentication fails.
-            if (!request->authenticate(getWebUsername().c_str(), getWebPassword().c_str())) {
-                return request->requestAuthentication();
-            }
-
-            // Step 1.2: Check if any Flash write/verification errors occurred during data stream processing.
-            bool success = !Update.hasError();
-
-            // Step 1.3: Build plain-text HTTP response payload ("OK" or "FAIL").
-            AsyncWebServerResponse *response = request->beginResponse(200, "text/plain", success ? "OK" : "FAIL");
-            
-            // Instruct client to close TCP connection immediately after receiving response.
-            response->addHeader("Connection", "close");
-            
-            // Transmit HTTP response back to client asynchronously.
-            request->send(response);
-
-            // Step 1.4: If update succeeded, schedule a non-blocking system restart via FreeRTOS Task.
-            if (success) {
-                xTaskCreate([](void *arg) {
-                    // Delay execution to allow AsyncWebServer enough time to flush HTTP response buffer to client.
-                    vTaskDelay(pdMS_TO_TICKS(OTA_RESTART_DELAY_MS));
-                    
-                    // Enqueue system restart command to main system task.
-                    postIncomingCommand(CMD_RESTART);
-                    
-                    // Self-terminate background task to prevent memory leak.
-                    vTaskDelete(NULL);
-                }, "ota_restart_task", 2048, NULL, 1, NULL);
-            }
-        },
-
-        // =========================================================================
-        // 2. DATA UPLOAD CALLBACK (Executes MULTIPLE TIMES for each incoming data chunk)
-        // =========================================================================
-        [](AsyncWebServerRequest *request, String filename, size_t index, uint8_t *data, size_t len, bool final) {
-            // Step 2.1: Secure raw binary data callback stream against unauthorized uploads.
-            if (!request->authenticate(getWebUsername().c_str(), getWebPassword().c_str())) {
-                return;
-            }
-
-            // Step 2.2: INITIALIZATION (Executes only for the first incoming data packet when index == 0).
-            if (!index) {
-                LOG_INFO("OTA Update started, filename: " + filename);
-
-                // Update.begin():
-                // 1. Identifies the inactive partition (e.g., ota_1) from partition table.
-                // 2. Erases target Flash partition range to prepare for writing incoming image.
-                if (!Update.begin(UPDATE_SIZE_UNKNOWN)) {
-                    LOG_ERROR("OTA Begin Error!");
-                    Update.printError(Serial);
-                }
-            }
-
-            // Step 2.3: FLASH WRITE (Executes for every incoming data packet chunk).
-            // Update.write(): Writes raw byte buffer directly into inactive Flash partition via SPI bus.
-            if (Update.write(data, len) != len) {
-                LOG_ERROR("OTA Write Error!");
-                Update.printError(Serial);
-            }
-
-            // Step 2.4: FINALIZATION (Executes only for the last packet of the file upload).
-            if (final) {
-                // Update.end(true):
-                // 1. Verifies binary checksum/MD5 and image headers.
-                // 2. Writes new boot target marker into 'otadata' partition, setting inactive partition as active for next reboot.
-                if (Update.end(true)) {
-                    LOG_INFO("OTA Update Success! Written bytes: " + String(index + len));
-                } else {
-                    LOG_ERROR("OTA End Error!");
-                    Update.printError(Serial);
-                }
-            }
-        }
-    );
+    // OTA Firmware Upload Endpoint
+    server->on("/doUpdate", HTTP_POST, handleOtaUpdateRequest, handleOtaUpload);
 
     server->begin();
     setWebLogReady();
@@ -525,11 +581,7 @@ uint8_t registerElement(const String& label, const String& unit, const String& i
 }
 
 void updateElementValue(uint8_t id, const String& newValue) {
-    
     updateElementValue(String(id), newValue);
-    
-    // Note: When sending, the buffer will be closed with a "]" to form a valid JSON array,
-    // and then cleared for the next batch of updates.
 }
 
 void updateElementValue(const String& key, const String& newValue) {
@@ -563,7 +615,6 @@ void updateWebConfig(uint16_t port, const String &user, const String &pass) {
     saveWebConfig();
 }
 
-
 /**
  * @brief Web Server & System Maintenance Task
  * @priority 1 (Low Priority)
@@ -573,12 +624,10 @@ void updateWebConfig(uint16_t port, const String &user, const String &pass) {
  */
 void vWebMonitorTask(void *pvParameters) {
     waiting_on_event(NETWORK_EVENT, NET_STATE_WIFI_STA, portMAX_DELAY);
-	loadWebConfig();	
+    loadWebConfig();	
     setupWebServer();
     for (;;) {
         ws.cleanupClients();
         vTaskDelay(pdMS_TO_TICKS(5000));
     }
 }
-
-

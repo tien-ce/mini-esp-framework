@@ -127,7 +127,6 @@ bool Xsns1(Signal_t signal) {
 
         case SIG_1SEC: {
             ProcessModbusPoll();
-            rule_on_event("TK4S",atof(pv_str));
             return true;
         }
 

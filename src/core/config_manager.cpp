@@ -1,79 +1,30 @@
 #include "core/config_manager.h"
 #include "core/log_task.h"
+#include <ArduinoJson.h>
+#include <Preferences.h>
 #include <FreeRTOS.h>
 #include <semphr.h>
-#include <vector>
-
-/* -------------------------------------------------------------------------- */
-/*                             DEFINES & CONSTANTS                            */
-/* -------------------------------------------------------------------------- */
-
-#define REGISTRY_FILE_PATH "/sys_config_registry.txt"
-
-/* -------------------------------------------------------------------------- */
-/*                            TYPES & STRUCTURES                             */
-/* -------------------------------------------------------------------------- */
-
-struct ModuleRegistryEntry {
-    String module_name;
-    String file_name;
-};
 
 /* -------------------------------------------------------------------------- */
 /*                              STATIC VARIABLES                              */
 /* -------------------------------------------------------------------------- */
 
-static std::vector<ModuleRegistryEntry> g_registry_list;
-static SemaphoreHandle_t configMutex = NULL;
+/* Internal registry using ArduinoJson for O(1) module-to-namespace lookups */
+static JsonDocument g_registry;
+static SemaphoreHandle_t g_config_mutex = NULL;
 
 /* -------------------------------------------------------------------------- */
 /*                              STATIC FUNCTIONS                              */
 /* -------------------------------------------------------------------------- */
 
-/** @brief Initializes config mutex. */
-static void initMutexes() {
-    if (configMutex == NULL) {
-        configMutex = xSemaphoreCreateMutex();
+/**
+ * @brief Helper to resolve NVS namespace for a registered module.
+ */
+static String get_namespace_internal(const String &module_name) {
+    if (g_registry.containsKey(module_name)) {
+        return g_registry[module_name].as<String>();
     }
-}
-
-/** @brief Saves registry list to LittleFS. */
-static void save_registry_list_internal() {
-    File f = LittleFS.open(REGISTRY_FILE_PATH, "w");
-    if (!f) {
-        return;
-    }
-    for (const auto &entry : g_registry_list) {
-        f.println(entry.module_name + "=" + entry.file_name);
-    }
-    f.close();
-}
-
-/** @brief Loads registry list from LittleFS. */
-static void load_registry_list_internal() {
-    g_registry_list.clear();
-    if (!LittleFS.exists(REGISTRY_FILE_PATH)) {
-        return;
-    }
-    File f = LittleFS.open(REGISTRY_FILE_PATH, "r");
-    if (!f) {
-        return;
-    }
-    while (f.available()) {
-        String line = f.readStringUntil('\n');
-        line.trim();
-        if (line.length() == 0) continue;
-        int eqIdx = line.indexOf('=');
-        if (eqIdx > 0) {
-            ModuleRegistryEntry entry;
-            entry.module_name = line.substring(0, eqIdx);
-            entry.file_name = line.substring(eqIdx + 1);
-            entry.module_name.trim();
-            entry.file_name.trim();
-            g_registry_list.push_back(entry);
-        }
-    }
-    f.close();
+    return "";
 }
 
 /* -------------------------------------------------------------------------- */
@@ -81,126 +32,250 @@ static void load_registry_list_internal() {
 /* -------------------------------------------------------------------------- */
 
 void config_manager_init() {
-    initMutexes();
-    if (!LittleFS.begin(true)) {
-        LOG_ERROR("LittleFS Mount Failed!");
-    } else {
-        LOG_INFO("LittleFS Mounted Successfully.");
-        load_registry_list_internal();
+    if (g_config_mutex == NULL) {
+        g_config_mutex = xSemaphoreCreateRecursiveMutex();
+    }
+    if (config_get_lock()) {
+        g_registry.clear();
+        config_release_lock();
+    }
+    LOG_INFO("Config manager (NVS / Preferences) initialized successfully.");
+}
+
+bool config_get_lock(TickType_t timeout_ticks) {
+    if (g_config_mutex == NULL) {
+        g_config_mutex = xSemaphoreCreateRecursiveMutex();
+    }
+    return (xSemaphoreTakeRecursive(g_config_mutex, timeout_ticks) == pdTRUE);
+}
+
+void config_release_lock() {
+    if (g_config_mutex != NULL) {
+        xSemaphoreGiveRecursive(g_config_mutex);
     }
 }
 
-bool register_config_file(const String &module_name, const String &file_name) {
-    bool result = false;
-    if (configMutex != NULL && xSemaphoreTake(configMutex, portMAX_DELAY) == pdTRUE) {
-        String trimmedModule = module_name;
-        String trimmedFile = file_name;
-        trimmedModule.trim();
-        trimmedFile.trim();
-
-        // 1. Check if file is already registered with another module
-        bool conflict = false;
-        bool existingFound = false;
-
-        for (auto &entry : g_registry_list) {
-            if (entry.file_name == trimmedFile) {
-                if (entry.module_name != trimmedModule) {
-                    conflict = true;
-                    break;
-                } else {
-                    existingFound = true;
-                }
-            } else if (entry.module_name == trimmedModule) {
-                // Same module name, update file name
-                entry.file_name = trimmedFile;
-                save_registry_list_internal();
-                existingFound = true;
-            }
-        }
-
-        if (conflict) {
-            LOG_ERROR("Registration failed: File '" + trimmedFile + "' is already registered to another module!");
-            result = false;
-        } else if (existingFound) {
-            result = true;
-        } else {
-            // New module registration
-            ModuleRegistryEntry newEntry;
-            newEntry.module_name = trimmedModule;
-            newEntry.file_name = trimmedFile;
-            g_registry_list.push_back(newEntry);
-            save_registry_list_internal();
-            LOG_INFO("Registered module '" + trimmedModule + "' with file '" + trimmedFile + "'");
-            result = true;
-        }
-
-        xSemaphoreGive(configMutex);
+bool register_config_module(const String &module_name, const String &nvs_namespace) {
+    if (module_name.length() == 0 || nvs_namespace.length() == 0) {
+        LOG_ERROR("Registration failed: module_name or namespace is empty");
+        return false;
     }
-    return result;
-}
+    if (nvs_namespace.length() > 15) {
+        LOG_ERROR("Registration failed: NVS namespace '" + nvs_namespace + "' exceeds 15 characters limit");
+        return false;
+    }
 
-bool save_config(const String &module_name, const String &content) {
     bool success = false;
-    if (configMutex != NULL && xSemaphoreTake(configMutex, portMAX_DELAY) == pdTRUE) {
-        String targetFile = "";
-        for (const auto &entry : g_registry_list) {
-            if (entry.module_name == module_name) {
-                targetFile = entry.file_name;
-                break;
-            }
-        }
-
-        if (targetFile.length() > 0) {
-            String path = targetFile.startsWith("/") ? targetFile : "/" + targetFile;
-            File f = LittleFS.open(path, "w");
-            if (f) {
-                f.print(content);
-                f.close();
-                success = true;
-            } else {
-                LOG_ERROR("Failed to open file for writing: " + path);
-            }
-        } else {
-            LOG_ERROR("Cannot save config: Module '" + module_name + "' is not registered.");
-        }
-        xSemaphoreGive(configMutex);
+    if (config_get_lock()) {
+        g_registry[module_name] = nvs_namespace;
+        LOG_INFO("Registered module '" + module_name + "' with NVS namespace '" + nvs_namespace + "'");
+        success = true;
+        config_release_lock();
     }
     return success;
 }
 
-String read_config(const String &module_name) {
-    String content = "";
-    String targetFile = "";
-    for (const auto &entry : g_registry_list) {
-        if (entry.module_name == module_name) {
-            targetFile = entry.file_name;
-            break;
-        }
-    }
-    if (targetFile.length() > 0) {
-        String path = targetFile.startsWith("/") ? targetFile : "/" + targetFile;
-        if (LittleFS.exists(path)) {
-            File f = LittleFS.open(path, "r");
-            if (f) {
-                content = f.readString();
-                f.close();
-            } else {
-                LOG_ERROR("Failed to open file for reading: " + path);
-            }
-        }
-    } else {
-        LOG_ERROR("Cannot read config: Module '" + module_name + "' is not registered.");
-    }
-    return content;
-}
-
 bool is_module_registered(const String &module_name) {
     bool registered = false;
-    for (const auto &entry : g_registry_list) {
-        if (entry.module_name == module_name) {
-            registered = true;
-            break;
-        }
+    if (config_get_lock()) {
+        registered = g_registry.containsKey(module_name);
+        config_release_lock();
     }
     return registered;
+}
+
+bool config_has_key(const String &module_name, const String &key) {
+    bool exists = false;
+    if (config_get_lock()) {
+        String ns = get_namespace_internal(module_name);
+        if (ns.length() > 0) {
+            Preferences prefs;
+            if (prefs.begin(ns.c_str(), true)) {
+                exists = prefs.isKey(key.c_str());
+                prefs.end();
+            }
+        }
+        config_release_lock();
+    }
+    return exists;
+}
+
+bool config_clear_module(const String &module_name) {
+    bool ok = false;
+    if (config_get_lock()) {
+        String ns = get_namespace_internal(module_name);
+        if (ns.length() > 0) {
+            Preferences prefs;
+            if (prefs.begin(ns.c_str(), false)) {
+                ok = prefs.clear();
+                prefs.end();
+            }
+        }
+        config_release_lock();
+    }
+    return ok;
+}
+
+bool config_save_string(const String &module_name, const String &key, const String &value) {
+    bool ok = false;
+    if (config_get_lock()) {
+        String ns = get_namespace_internal(module_name);
+        if (ns.length() > 0) {
+            Preferences prefs;
+            if (prefs.begin(ns.c_str(), false)) {
+                prefs.putString(key.c_str(), value);
+                prefs.end();
+                ok = true;
+            } else {
+                LOG_ERROR("Failed to open NVS namespace: " + ns);
+            }
+        } else {
+            LOG_ERROR("Cannot save: Module '" + module_name + "' is not registered.");
+        }
+        config_release_lock();
+    }
+    return ok;
+}
+
+String config_read_string(const String &module_name, const String &key, const String &default_val) {
+    String result = default_val;
+    if (config_get_lock()) {
+        String ns = get_namespace_internal(module_name);
+        if (ns.length() > 0) {
+            Preferences prefs;
+            if (prefs.begin(ns.c_str(), true)) {
+                if (prefs.isKey(key.c_str())) {
+                    result = prefs.getString(key.c_str(), default_val);
+                }
+                prefs.end();
+            }
+        } else {
+            LOG_ERROR("Cannot read: Module '" + module_name + "' is not registered.");
+        }
+        config_release_lock();
+    }
+    return result;
+}
+
+bool config_save_int(const String &module_name, const String &key, int32_t value) {
+    bool ok = false;
+    if (config_get_lock()) {
+        String ns = get_namespace_internal(module_name);
+        if (ns.length() > 0) {
+            Preferences prefs;
+            if (prefs.begin(ns.c_str(), false)) {
+                prefs.putInt(key.c_str(), value);
+                prefs.end();
+                ok = true;
+            } else {
+                LOG_ERROR("Failed to open NVS namespace: " + ns);
+            }
+        } else {
+            LOG_ERROR("Cannot save: Module '" + module_name + "' is not registered.");
+        }
+        config_release_lock();
+    }
+    return ok;
+}
+
+int32_t config_read_int(const String &module_name, const String &key, int32_t default_val) {
+    int32_t result = default_val;
+    if (config_get_lock()) {
+        String ns = get_namespace_internal(module_name);
+        if (ns.length() > 0) {
+            Preferences prefs;
+            if (prefs.begin(ns.c_str(), true)) {
+                if (prefs.isKey(key.c_str())) {
+                    result = prefs.getInt(key.c_str(), default_val);
+                }
+                prefs.end();
+            }
+        } else {
+            LOG_ERROR("Cannot read: Module '" + module_name + "' is not registered.");
+        }
+        config_release_lock();
+    }
+    return result;
+}
+
+bool config_save_bool(const String &module_name, const String &key, bool value) {
+    bool ok = false;
+    if (config_get_lock()) {
+        String ns = get_namespace_internal(module_name);
+        if (ns.length() > 0) {
+            Preferences prefs;
+            if (prefs.begin(ns.c_str(), false)) {
+                prefs.putBool(key.c_str(), value);
+                prefs.end();
+                ok = true;
+            } else {
+                LOG_ERROR("Failed to open NVS namespace: " + ns);
+            }
+        } else {
+            LOG_ERROR("Cannot save: Module '" + module_name + "' is not registered.");
+        }
+        config_release_lock();
+    }
+    return ok;
+}
+
+bool config_read_bool(const String &module_name, const String &key, bool default_val) {
+    bool result = default_val;
+    if (config_get_lock()) {
+        String ns = get_namespace_internal(module_name);
+        if (ns.length() > 0) {
+            Preferences prefs;
+            if (prefs.begin(ns.c_str(), true)) {
+                if (prefs.isKey(key.c_str())) {
+                    result = prefs.getBool(key.c_str(), default_val);
+                }
+                prefs.end();
+            }
+        } else {
+            LOG_ERROR("Cannot read: Module '" + module_name + "' is not registered.");
+        }
+        config_release_lock();
+    }
+    return result;
+}
+
+bool config_save_float(const String &module_name, const String &key, float value) {
+    bool ok = false;
+    if (config_get_lock()) {
+        String ns = get_namespace_internal(module_name);
+        if (ns.length() > 0) {
+            Preferences prefs;
+            if (prefs.begin(ns.c_str(), false)) {
+                prefs.putFloat(key.c_str(), value);
+                prefs.end();
+                ok = true;
+            } else {
+                LOG_ERROR("Failed to open NVS namespace: " + ns);
+            }
+        } else {
+            LOG_ERROR("Cannot save: Module '" + module_name + "' is not registered.");
+        }
+        config_release_lock();
+    }
+    return ok;
+}
+
+float config_read_float(const String &module_name, const String &key, float default_val) {
+    float result = default_val;
+    if (config_get_lock()) {
+        String ns = get_namespace_internal(module_name);
+        if (ns.length() > 0) {
+            Preferences prefs;
+            if (prefs.begin(ns.c_str(), true)) {
+                if (prefs.isKey(key.c_str())) {
+                    result = prefs.getFloat(key.c_str(), default_val);
+                }
+                prefs.end();
+            }
+        } else {
+            LOG_ERROR("Cannot read: Module '" + module_name + "' is not registered.");
+        }
+        config_release_lock();
+    }
+    return result;
 }

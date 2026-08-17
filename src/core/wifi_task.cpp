@@ -33,56 +33,35 @@ static void initWifiMutex() {
 }
 
 /**
- * @brief Saves WiFi configuration settings to LittleFS.
+ * @brief Saves WiFi configuration settings to NVS.
  */
 static void saveWifiConfig() {
-    String content = "";
     if (wifiConfigMutex != NULL && xSemaphoreTake(wifiConfigMutex, portMAX_DELAY) == pdTRUE) {
-        content += "ssid=" + wifi_ssid + "\n";
-        content += "pass=" + wifi_password + "\n";
+        if (config_get_lock()) {
+            config_save_string("wifi", "ssid", wifi_ssid);
+            config_save_string("wifi", "pass", wifi_password);
+            config_release_lock();
+        }
         xSemaphoreGive(wifiConfigMutex);
     }
-    save_config("wifi", content);
 }
 
 /**
- * @brief Loads WiFi module configuration from LittleFS.
+ * @brief Loads WiFi module configuration from NVS.
  */
 static void loadWifiConfig() {
     initWifiMutex();
-    register_config_file("wifi", "wifi_config.txt");
-    /* Init and save config */
-	String raw = read_config("wifi");
-	if (raw.length() == 0) {
-		/* Use default if config file is not found or empty */
-		LOG_INFO("WiFi config file not found or empty. Creating default wifi_config.txt");
-		wifi_ssid = WIFI_SSID;
-		wifi_password = WIFI_PASSWORD;
-		saveWifiConfig();
-		return;
-	}
-	int pos = 0;
-	while (pos < raw.length()) {
-		int nextPos = raw.indexOf('\n', pos);
-		if (nextPos == -1) nextPos = raw.length();
-		String line = raw.substring(pos, nextPos);
-		line.trim();
-		pos = nextPos + 1;
-		if (line.length() == 0) continue;
-		int eqIdx = line.indexOf('=');
-		if (eqIdx > 0) {
-			String key = line.substring(0, eqIdx);
-			String val = line.substring(eqIdx + 1);
-			key.trim();
-			val.trim();
-			if (key.equalsIgnoreCase("ssid")) {
-				wifi_ssid = val;
-			} else if (key.equalsIgnoreCase("pass")) {
-				wifi_password = val;
-			}
-		}
-	}
-    LOG_INFO("WiFi config loaded successfully.");
+    register_config_module("wifi", "wifi");
+
+    if (wifiConfigMutex != NULL && xSemaphoreTake(wifiConfigMutex, portMAX_DELAY) == pdTRUE) {
+        if (config_get_lock()) {
+            wifi_ssid = config_read_string("wifi", "ssid", WIFI_SSID);
+            wifi_password = config_read_string("wifi", "pass", WIFI_PASSWORD);
+            config_release_lock();
+        }
+        xSemaphoreGive(wifiConfigMutex);
+    }
+    LOG_INFO("WiFi config loaded from NVS successfully.");
 }
 
 /**
@@ -216,12 +195,13 @@ String getWifiPassword() {
 
 void updateWifiConfig(const String &newSsid, const String &newPass) {
     if (wifiConfigMutex != NULL && xSemaphoreTake(wifiConfigMutex, portMAX_DELAY) == pdTRUE) {
-		String content = "";
         wifi_ssid = newSsid;
         wifi_password = newPass;
-		content += "ssid=" + wifi_ssid + "\n";
-		content += "pass=" + wifi_password + "\n";
-		save_config("wifi", content);
+        if (config_get_lock()) {
+            config_save_string("wifi", "ssid", wifi_ssid);
+            config_save_string("wifi", "pass", wifi_password);
+            config_release_lock();
+        }
         xSemaphoreGive(wifiConfigMutex);
     }
 }

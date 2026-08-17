@@ -39,64 +39,39 @@ static void initMqttMutex() {
 }
 
 static void saveMqttConfig() {
-    String content = "";
     if (mqttMutex != NULL && xSemaphoreTake(mqttMutex, portMAX_DELAY) == pdTRUE) {
-        content += "server=" + mqtt_server + "\n";
-        content += "port=" + String(mqtt_port) + "\n";
-        content += "user=" + mqtt_user + "\n";
-        content += "pass=" + mqtt_pass + "\n";
-        content += "interval=" + String(mqtt_interval) + "\n";
-        content += "data_topic=" + mqtt_data_topic + "\n";
-        content += "rpc_topic=" + mqtt_rpc_topic + "\n";
+        if (config_get_lock()) {
+            config_save_string("mqtt", "server", mqtt_server);
+            config_save_int("mqtt", "port", mqtt_port);
+            config_save_string("mqtt", "user", mqtt_user);
+            config_save_string("mqtt", "pass", mqtt_pass);
+            config_save_int("mqtt", "interval", mqtt_interval);
+            config_save_string("mqtt", "data_topic", mqtt_data_topic);
+            config_save_string("mqtt", "rpc_topic", mqtt_rpc_topic);
+            config_release_lock();
+        }
         xSemaphoreGive(mqttMutex);
     }
-    save_config("mqtt", content);
 }
 
 static void loadMqttConfig() {
-    register_config_file("mqtt", "mqtt_config.txt");
     initMqttMutex();
+    register_config_module("mqtt", "mqtt");
 
-    String raw = read_config("mqtt");
-    if (raw.length() == 0) {
-        LOG_INFO("mqtt config file not found or empty. Creating default mqtt_config.txt");
-        mqtt_server     = MQTT_SERVER;
-        mqtt_port       = MQTT_PORT;
-        mqtt_user       = MQTT_USER;
-        mqtt_pass       = MQTT_PASS;
-        mqtt_interval   = MQTT_INTERVAL;
-        mqtt_data_topic = MQTT_DATA_TOPIC;
-        mqtt_rpc_topic  = MQTT_RPC_TOPIC;
-        saveMqttConfig();
-        return;
-    }
-
-    int pos = 0;
-    while (pos < raw.length()) {
-        int nextpos = raw.indexOf('\n', pos);
-        if (nextpos == -1) nextpos = raw.length();
-        String line = raw.substring(pos, nextpos);
-        line.trim();
-        pos = nextpos + 1;
-
-        if (line.length() == 0) continue;
-        int eqidx = line.indexOf('=');
-        if (eqidx > 0) {
-            String key = line.substring(0, eqidx);
-            String val = line.substring(eqidx + 1);
-            key.trim();
-            val.trim();
-
-            if (key.equalsIgnoreCase("server")) mqtt_server = val;
-            else if (key.equalsIgnoreCase("port")) mqtt_port = (uint16_t)val.toInt();
-            else if (key.equalsIgnoreCase("user")) mqtt_user = val;
-            else if (key.equalsIgnoreCase("pass")) mqtt_pass = val;
-            else if (key.equalsIgnoreCase("interval")) mqtt_interval = (uint32_t)val.toInt();
-            else if (key.equalsIgnoreCase("data_topic")) mqtt_data_topic = val;
-            else if (key.equalsIgnoreCase("rpc_topic")) mqtt_rpc_topic = val;
+    if (mqttMutex != NULL && xSemaphoreTake(mqttMutex, portMAX_DELAY) == pdTRUE) {
+        if (config_get_lock()) {
+            mqtt_server     = config_read_string("mqtt", "server", MQTT_SERVER);
+            mqtt_port       = (uint16_t)config_read_int("mqtt", "port", MQTT_PORT);
+            mqtt_user       = config_read_string("mqtt", "user", MQTT_USER);
+            mqtt_pass       = config_read_string("mqtt", "pass", MQTT_PASS);
+            mqtt_interval   = (uint32_t)config_read_int("mqtt", "interval", MQTT_INTERVAL);
+            mqtt_data_topic = config_read_string("mqtt", "data_topic", MQTT_DATA_TOPIC);
+            mqtt_rpc_topic  = config_read_string("mqtt", "rpc_topic", MQTT_RPC_TOPIC);
+            config_release_lock();
         }
+        xSemaphoreGive(mqttMutex);
     }
-    LOG_INFO("mqtt config loaded successfully.");
+    LOG_INFO("mqtt config loaded from NVS successfully.");
 }
 
 static void connectBroker() {
