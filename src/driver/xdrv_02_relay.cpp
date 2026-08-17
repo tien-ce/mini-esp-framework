@@ -61,9 +61,9 @@ bool Xdrv2(Signal_t signal) {
                         digitalWrite(pin, LOW);
 
                         // Register exact command corresponding to the relay
-                        if (i == 0) register_cmd("RELAY1", relay1_cmd);
-                        else if (i == 1) register_cmd("RELAY2", relay2_cmd);
-                        else if (i == 2) register_cmd("RELAY3", relay3_cmd);
+                        if (i == 0) register_cmd(RELAY1_CMD, relay1_cmd);
+                        else if (i == 1) register_cmd(RELAY2_CMD, relay2_cmd);
+                        else if (i == 2) register_cmd(RELAY3_CMD, relay3_cmd);
 
                         used_count++;
                         LOG_INFO("Registered " + relay_name + " on GPIO " + String(pin));
