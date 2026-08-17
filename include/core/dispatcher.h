@@ -23,6 +23,10 @@ typedef enum {
     SIG_100MS,
     SIG_1SEC,
     
+    /* Wifi */ 
+    SIG_WIFI_CONNECTED,
+    SIG_WIFI_DISCONNECTED,
+
     /* Web */
     SIG_WEB_POLL,
     

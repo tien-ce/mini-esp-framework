@@ -71,8 +71,11 @@ static bool CoreState_Init(void) {
     config_manager_init();
     // 4. Init pin config system (loads pin_config.txt from LittleFS)
     pin_config_init();
-
-    //5 broadcast MODBE_BOOT event
+    // 5. Rule engine init
+    rule_engine_init();
+    // 6. Init dispatcher
+    dispatcher_init();
+    //broadcast MODBE_BOOT event
     CoreState_SetMode(SYS_BOOT);
     return true;
 }
@@ -251,5 +254,4 @@ void CoreEngine_Start() {
        1
     );
     waiting_on_event(SYSTEM_EVENT, SYS_NORMAL, pdMS_TO_TICKS(5000));
-	dispatcher_init();
 }

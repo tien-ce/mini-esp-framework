@@ -1,4 +1,5 @@
 #include "core/dispatcher.h"
+#include "core/core_engine.h"
 #include <stdbool.h>
 #include <stdint.h>
 #include <climits>
@@ -96,6 +97,8 @@ static void execute_dispatch(Signal_t signal) {
  * @brief Dispatcher Task: Sleeps until notified by ISR or non-ISR calls
  */
 static void vDispatcherTask(void *pvParameters) {
+  /* Wait until log system is ready */
+    waiting_on_event(SYSTEM_EVENT, SYS_NORMAL, portMAX_DELAY);
     uint32_t notified_bits = 0;
     //execute_dispatch(SIG_INIT); // Initial dispatch for all drivers
     for (uint8_t i = 0; i < NUM_DRIVERS; i++) {

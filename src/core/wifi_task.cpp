@@ -1,4 +1,5 @@
 #include "core/wifi_task.h"
+#include "core/dispatcher.h"
 #include "core/log_task.h"
 #include "core/core_engine.h"
 #include "config.h"
@@ -169,6 +170,7 @@ static void setup_wifi() {
 
     if (WiFi.status() == WL_CONNECTED) {
         CoreState_SetNetwork(NET_STATE_WIFI_STA);
+        dispatch_signal(SIG_WIFI_CONNECTED); 
         randomSeed(micros());
         LOG_INFO("WiFi connected successfully!");
         LOG_INFO("IP Address: " + WiFi.localIP().toString());
@@ -247,6 +249,7 @@ void vWifiTask(void *pvParameters) {
             CoreState_SetNetwork(NET_STATE_DISCONNECTED);
             if (currentMillis - previousWifiMillis >= wifiReconnectInterval) {
                 CoreState_SetNetwork(NET_STATE_CONNECTING);
+                dispatch_signal(SIG_WIFI_DISCONNECTED);
                 LOG_WARNING("WiFi DISCONNECTED! Reconnecting...");
                 WiFi.disconnect();
                 String currentSsid = getWifiSSID();

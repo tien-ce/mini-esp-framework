@@ -80,10 +80,7 @@ void postIncomingCommand(const String &cmdText);
 /* -------------------------------------------------------------------------- */
 /*                               STRING CONSTANTS                             */
 /* -------------------------------------------------------------------------- */
-#define CMD_SET_LOG_LEVEL   "CMD_SET_LEVEL"
-#define CMD_GET_LOG_LEVEL   "CMD_GET_LEVEL"
-#define CMD_LIST_LOG_LEVEL  "CMD_LIST_LEVEL"
-#define CMD_RESTART         "ESP32_RESTART"
+#include "cmd.h"
 #endif // LOG_TASK_H
 
 
