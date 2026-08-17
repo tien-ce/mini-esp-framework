@@ -33,7 +33,7 @@ a{text-decoration:none;}
 <a href='/console'><button>Console</button></a>
 <button class='inactive'>Berry Scripting console</button>
 <button class='inactive'>Extension Manager</button>
-<button class='inactive'>Manage File system</button>
+<a href='/tools/manage_file_system'><button>Manage File system</button></a>
 <button class='inactive'>GPIO Viewer</button>
 <a href='/'><button>Main Menu</button></a>
 

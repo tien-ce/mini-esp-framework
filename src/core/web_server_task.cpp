@@ -11,6 +11,7 @@
 #include "html/ota_html.h"
 #include "html/config_html.h"
 #include "html/config_module_html.h"
+#include "html/manage_file_system_html.h"
 #include "core/pin_config.h"
 #include "core/dispatcher.h"
 #include <Arduino.h>
@@ -254,6 +255,14 @@ static void setupWebServer() {
             return request->requestAuthentication();
         }
         request->send(200, "text/html", renderTemplate(TOOLS_HTML));
+    });
+
+    // Page 3.1: Manage File System UI
+    server->on("/tools/manage_file_system", HTTP_GET, [](AsyncWebServerRequest *request) {
+        if (!request->authenticate(getWebUsername().c_str(), getWebPassword().c_str())) {
+            return request->requestAuthentication();
+        }
+        request->send(200, "text/html", renderTemplate(MANAGE_FILE_SYSTEM_HTML));
     });
 
     // Page 4: Console UI

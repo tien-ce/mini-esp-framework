@@ -204,4 +204,3 @@ bool is_module_registered(const String &module_name) {
     }
     return registered;
 }
-
