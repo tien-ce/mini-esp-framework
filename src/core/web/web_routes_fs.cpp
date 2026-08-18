@@ -4,42 +4,78 @@
 #include <LittleFS.h>
 #include <ArduinoJson.h>
 
+static char *buffer = NULL;
+static size_t buffer_length = 0;
+// Custom Allocator forcing all internal allocations to PSRAM
+struct PsramAllocator : ArduinoJson::Allocator {
+    void* allocate(size_t size) override {
+        return ps_malloc(size);
+    }
+    void deallocate(void* ptr) override {
+        free(ptr);
+    }
+    void* reallocate(void* ptr, size_t new_size) override {
+        return ps_realloc(ptr, new_size);
+    }
+};
+// Global or static instance of the allocator
+PsramAllocator psramAlloc;
 /* -------------------------------------------------------------------------- */
 /*                              STATIC FUNCTIONS                              */
 /* -------------------------------------------------------------------------- */
 
 /** @brief Handles HTTP GET request for LittleFS storage statistics and file directory list ("/api/fs/list"). */
+/* 
+{
+  "totalBytes": 1441792,
+  "usedBytes": 28672,
+  "files": [
+      {
+      "name": "/web_config.txt",
+      "size": 120
+      }
+  ]
+}
+*/
 static void handleFSList(AsyncWebServerRequest *request) {
-    if (!web_authenticate(request)) return;
-
-    if (!LittleFS.begin(true)) {
-        request->send(500, "application/json", "{\"error\":\"LittleFS mount failed\"}");
-        return;
+    if (!request->authenticate(getWebUsername().c_str(), getWebPassword().c_str())) {
+        return request->requestAuthentication();
     }
 
     JsonDocument doc;
-    doc["totalBytes"] = LittleFS.totalBytes();
-    doc["usedBytes"]  = LittleFS.usedBytes();
+    doc["totalBytes"] = file_system_get_size();
+    doc["usedBytes"]  = file_system_get_used();
+
+    // files: []
     JsonArray filesArray = doc["files"].to<JsonArray>();
 
-    File root = LittleFS.open("/");
-    if (root && root.isDirectory()) {
-        File file = root.openNextFile();
-        while (file) {
-            JsonObject item = filesArray.add<JsonObject>();
-            String fname = file.name();
-            if (!fname.startsWith("/")) {
-                fname = "/" + fname;
+    char *rawListJson = list_file("/");
+    if (rawListJson != NULL) {
+        JsonDocument listDoc;
+        /* {
+         * "name":
+          "size":
+           }
+        */
+        DeserializationError err = deserializeJson(listDoc, rawListJson);
+        if (!err) {
+            JsonObject rootObj = listDoc.as<JsonObject>();
+            for (JsonPair kv : rootObj) {
+                // Add an object{} to array []
+                JsonObject item = filesArray.add<JsonObject>();
+                // Store vale to object instance
+                String filename = kv.key().c_str();
+                size_t size = kv.value().as<size_t>();
+                item["name"] = filename;
+                item["size"] = size;
             }
-            item["name"] = fname;
-            item["size"] = file.size();
-            file = root.openNextFile();
         }
-        root.close();
+        free(rawListJson);
     }
 
     String responsePayload;
     serializeJson(doc, responsePayload);
+
     request->send(200, "application/json", responsePayload);
 }
 
@@ -53,14 +89,6 @@ static void handleFSRead(AsyncWebServerRequest *request) {
     }
 
     String path = request->getParam("path")->value();
-    if (!path.startsWith("/")) {
-        path = "/" + path;
-    }
-
-    if (!LittleFS.begin(true)) {
-        request->send(500, "text/plain", "LittleFS mount failed");
-        return;
-    }
 
     if (!LittleFS.exists(path)) {
         request->send(404, "text/plain", "File not found");
@@ -80,40 +108,42 @@ static void handleFSRead(AsyncWebServerRequest *request) {
 
 /** @brief Header callback placeholder for saving file content ("/api/fs/save"). */
 static void handleFSSaveRequest(AsyncWebServerRequest *request) {
-    // Body parsing handled in handleFSSaveBody
+  #ifdef SYSTEM_USES_PSAM
+    JsonDocument doc(&psramAlloc);
+  #else
+      JsonDocument doc;
+  #endif
+    DeserializationError err = deserializeJson(doc, (const char*)buffer, bytes_write);
+    String path = doc["path"].as<String>();
+    String content = doc["content"].as<String>();
+    unsigned int write_length = content.length();
+    if (err || !doc.containsKey("path") || !doc.containsKey("content")) {
+        request->send(400, "text/plain", "Invalid JSON payload or missing path/content");
+        return;
+    }
+    size_t write_length = write_file(path.c_str(),content.c_str(), bytes_write);
+    /* Check if write full bytes */
+    if(write_length != bytes_write)
+    {
+        request->send(500, "text/plain", "Write %d bytes instead of %d bytes", bytes_write, write_length);
+        return;
+    }
+    request->send(200, "text/plain", "OK");
+    free(buffer);
 }
 
 /** @brief Handles HTTP POST body payload for creating or saving a LittleFS file ("/api/fs/save"). */
 static void handleFSSaveBody(AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total) {
     if (!web_authenticate(request)) return;
-
-    JsonDocument doc;
-    DeserializationError err = deserializeJson(doc, (const char*)data, len);
-    if (err || !doc.containsKey("path") || !doc.containsKey("content")) {
-        request->send(400, "text/plain", "Invalid JSON payload or missing path/content");
-        return;
-    }
-
-    String path = doc["path"].as<String>();
-    String content = doc["content"].as<String>();
-    if (!path.startsWith("/")) {
-        path = "/" + path;
-    }
-
-    if (!LittleFS.begin(true)) {
-        request->send(500, "text/plain", "LittleFS mount failed");
-        return;
-    }
-
-    File f = LittleFS.open(path, "w");
-    if (!f) {
-        request->send(500, "text/plain", "Failed to open file for writing");
-        return;
-    }
-
-    f.print(content);
-    f.close();
-    request->send(200, "text/plain", "OK");
+    // Allocate more buffe
+    size_t new_lenght = buffer_length + len; 
+    #ifdef SYSTEM_USES_PSAM
+      buffer = ps_realloc(buffer, sizeof(char) * (new_lenght));
+    #else
+      buffer = realloc(buffer, sizeof(char) * (new_lenght));
+    #endif
+    // Copy data to buffer
+    memcpy(buffer[buffer_length], data, len);
 }
 
 /** @brief Header callback placeholder for deleting a file ("/api/fs/delete"). */
