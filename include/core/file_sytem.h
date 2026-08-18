@@ -5,8 +5,8 @@ bool init_file_system(bool formatonfail = true, const char *basepath = "littlefs
 size_t file_system_get_size();
 size_t file_system_get_used();
 /* file and directory interaction */
-char* readfile(const char *path, unsigned int *bytesread);
-unsigned int writefile(const char *path, const char *data, unsigned int lenght);
+char* read_file(const char *path, unsigned int *bytesread);
+unsigned int write_file(const char *path, const char *data, unsigned int lenght);
 char *list_file(const char *dir_path);
 bool remove_file(const char *path);
 bool rename_file(const char *pathform, const char *pathto);
