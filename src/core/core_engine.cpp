@@ -1,4 +1,5 @@
 #include "core/core_engine.h"
+#include "core/file_system.h"
 #include "core/pin_config.h"
 #include "core/dispatcher.h"
 /* -------------------------------------------------------------------------- */
@@ -69,6 +70,11 @@ static bool CoreState_Init(void) {
     g_state_matrix.last_update = xTaskGetTickCount();
     // 3. Init config manager (NVS / Preferences)
     config_manager_init();
+    // Init file system  
+    if(!file_system_init())
+    {
+        file_system_format();
+    }
     // 4. Init pin config system (loads pin mappings from NVS)
     pin_config_init();
     // 5. Init dispatcher

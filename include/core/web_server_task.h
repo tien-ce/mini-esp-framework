@@ -9,6 +9,7 @@
 #include "core/web/web_routes_pages.h"
 #include "core/web/web_routes_api.h"
 #include "core/web/web_routes_ota.h"
+#include "core/web/web_routes_fs.h"
 
 /* -------------------------------------------------------------------------- */
 /*                              PUBLIC FUNCTIONS                              */

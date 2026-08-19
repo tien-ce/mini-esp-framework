@@ -1,11 +1,26 @@
 #include "core/web/web_routes_fs.h"
 #include "core/web/web_auth.h"
 #include "core/log_task.h"
-#include <LittleFS.h>
+#include "core/file_system.h"
+#include "hal/uart_types.h"
 #include <ArduinoJson.h>
+#include <WCharacter.h>
 
-static char *buffer = NULL;
-static size_t buffer_length = 0;
+struct UploadContext {
+    char *buffer = NULL;
+    size_t total_size = 0;
+    size_t received_size = 0;
+
+    // Deconstructor (need to supprot by delete of cpp)
+    ~UploadContext() {
+        if (buffer != NULL)
+        {
+            free(buffer);
+            buffer = NULL;
+        }
+    }
+};
+
 // Custom Allocator forcing all internal allocations to PSRAM
 struct PsramAllocator : ArduinoJson::Allocator {
     void* allocate(size_t size) override {
@@ -24,8 +39,87 @@ PsramAllocator psramAlloc;
 /*                              STATIC FUNCTIONS                              */
 /* -------------------------------------------------------------------------- */
 
+/** @brief Ensures a path coming from a request (query param or JSON body) is absolute, since LittleFS/VFS paths must start with '/'. */
+static String normalize_fs_path(const String &rawPath) {
+    if (rawPath.startsWith("/")) {
+        return rawPath;
+    }
+    return "/" + rawPath;
+}
+
+/** @brief Maps a file_system.h FsResult_t to the appropriate HTTP status code and sends it. */
+static void send_fs_error(AsyncWebServerRequest *request, FsResult_t result) {
+    int httpCode;
+    switch (result) {
+        case FS_ERR_NOT_FOUND:
+            httpCode = 404;
+            break;
+        case FS_ERR_IS_DIRECTORY:
+        case FS_ERR_NOT_A_DIRECTORY:
+        case FS_ERR_ALREADY_EXISTS:
+        case FS_ERR_INVALID_ARG:
+            httpCode = 400;
+            break;
+        case FS_ERR_NOT_MOUNTED:
+        case FS_ERR_OPEN_FAILED:
+        case FS_ERR_ALLOC_FAILED:
+        case FS_ERR_WRITE_INCOMPLETE:
+        case FS_ERR_OPERATION_FAILED:
+        default:
+            httpCode = 500;
+            break;
+    }
+    request->send(httpCode, "text/plain", file_system_strerror(result));
+}
+
+/**
+ * @brief Accumulates chunked POST body data into a heap buffer stored on request->_tempObject.
+ *
+ * Shared by /api/fs/save and /api/fs/delete, both of which receive a JSON body that may
+ * arrive split across several TCP chunks. Allocates on the first chunk (index == 0) and
+ * registers an idempotent onDisconnect cleanup (safe even if the caller already deleted
+ * the context after a normal completion, since it re-reads request->_tempObject instead
+ * of a captured pointer).
+ */
+static UploadContext *accumulate_body_chunk(AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total) {
+    UploadContext *ctx = (UploadContext*)request->_tempObject;
+    if (index == 0) {
+        ctx = new UploadContext();
+        ctx->total_size = total;
+        #ifdef SYSTEM_USES_PSRAM
+            ctx->buffer = (char*)ps_malloc(total + 1);
+        #else
+            ctx->buffer = (char*)malloc(total + 1);
+        #endif
+        if (!ctx->buffer) {
+            delete ctx;
+            request->_tempObject = nullptr;
+            return nullptr;
+        }
+        request->_tempObject = ctx; // Assign temp_object for next body handles of this request
+        request->onDisconnect([request]() {
+            UploadContext *pending = (UploadContext*)request->_tempObject;
+            if (pending) {
+                delete pending;
+                request->_tempObject = nullptr;
+            }
+        });
+    }
+
+    if (ctx && ctx->buffer) {
+        memcpy(ctx->buffer + index, data, len);
+        ctx->received_size += len;
+
+        // Null-terminate at the end of the payload
+        if (index + len == total) {
+            ctx->buffer[total] = '\0';
+        }
+    }
+    return ctx;
+}
+
 /** @brief Handles HTTP GET request for LittleFS storage statistics and file directory list ("/api/fs/list"). */
-/* 
+/*
 {
   "totalBytes": 1441792,
   "usedBytes": 28672,
@@ -38,9 +132,7 @@ PsramAllocator psramAlloc;
 }
 */
 static void handleFSList(AsyncWebServerRequest *request) {
-    if (!request->authenticate(getWebUsername().c_str(), getWebPassword().c_str())) {
-        return request->requestAuthentication();
-    }
+    if (!web_authenticate(request)) return;
 
     JsonDocument doc;
     doc["totalBytes"] = file_system_get_size();
@@ -49,8 +141,8 @@ static void handleFSList(AsyncWebServerRequest *request) {
     // files: []
     JsonArray filesArray = doc["files"].to<JsonArray>();
 
-    char *rawListJson = list_file("/");
-    if (rawListJson != NULL) {
+    char *rawListJson = NULL;
+    if (list_file("/", &rawListJson) == FS_OK && rawListJson != NULL) {
         JsonDocument listDoc;
         /* {
          * "name":
@@ -87,101 +179,93 @@ static void handleFSRead(AsyncWebServerRequest *request) {
         request->send(400, "text/plain", "Missing 'path' parameter");
         return;
     }
+    String path = normalize_fs_path(request->getParam("path")->value());
 
-    String path = request->getParam("path")->value();
-
-    if (!LittleFS.exists(path)) {
-        request->send(404, "text/plain", "File not found");
+    char *fileData = NULL;
+    unsigned int bytesRead = 0;
+    FsResult_t result = read_file(path.c_str(), &fileData, &bytesRead);
+    if (result != FS_OK) {
+        send_fs_error(request, result);
         return;
     }
 
-    File f = LittleFS.open(path, "r");
-    if (!f) {
-        request->send(500, "text/plain", "Failed to open file for reading");
-        return;
-    }
-
-    String content = f.readString();
-    f.close();
+    String content(fileData);
+    free(fileData);
     request->send(200, "text/plain", content);
 }
 
-/** @brief Header callback placeholder for saving file content ("/api/fs/save"). */
+/** @brief Header callback: Executes after all body chunks are received */
 static void handleFSSaveRequest(AsyncWebServerRequest *request) {
-  #ifdef SYSTEM_USES_PSAM
+    if (!web_authenticate(request)) {
+        request->send(401, "text/plain", "Unauthorized");
+        return;
+    }
+    UploadContext *ctx = (UploadContext*)request->_tempObject; // Get context constructed in body
+    // Check if buffer allocation failed or upload was incomplete
+    if (!ctx || !ctx->buffer || ctx->received_size != ctx->total_size) {
+        request->send(500, "text/plain", "Upload failed or memory allocation error");
+        if (ctx) {
+            delete ctx;
+            request->_tempObject = nullptr;
+        }
+        return;
+    }
+
+  #ifdef SYSTEM_USES_PSRAM
     JsonDocument doc(&psramAlloc);
   #else
       JsonDocument doc;
   #endif
-    DeserializationError err = deserializeJson(doc, (const char*)buffer, bytes_write);
-    String path = doc["path"].as<String>();
-    String content = doc["content"].as<String>();
-    unsigned int write_length = content.length();
+    DeserializationError err = deserializeJson(doc, (const char*)ctx->buffer, ctx->total_size);
     if (err || !doc.containsKey("path") || !doc.containsKey("content")) {
+        delete ctx;
+        request->_tempObject = nullptr;
         request->send(400, "text/plain", "Invalid JSON payload or missing path/content");
         return;
     }
-    size_t write_length = write_file(path.c_str(),content.c_str(), bytes_write);
-    /* Check if write full bytes */
-    if(write_length != bytes_write)
-    {
-        request->send(500, "text/plain", "Write %d bytes instead of %d bytes", bytes_write, write_length);
+    String path = normalize_fs_path(doc["path"].as<String>());
+    const char *content = doc["content"];
+    size_t write_length = strlen(content);
+
+    unsigned int writtenBytes = 0;
+    FsResult_t result = write_file(path.c_str(), content, write_length, &writtenBytes);
+    // Free buffer as soon as write is completed
+    delete ctx;
+    request->_tempObject = nullptr;
+
+    if (result != FS_OK) {
+        send_fs_error(request, result);
         return;
     }
     request->send(200, "text/plain", "OK");
-    free(buffer);
 }
 
 /** @brief Handles HTTP POST body payload for creating or saving a LittleFS file ("/api/fs/save"). */
 static void handleFSSaveBody(AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total) {
     if (!web_authenticate(request)) return;
-    // Allocate more buffe
-    size_t new_lenght = buffer_length + len; 
-    #ifdef SYSTEM_USES_PSAM
-      buffer = ps_realloc(buffer, sizeof(char) * (new_lenght));
-    #else
-      buffer = realloc(buffer, sizeof(char) * (new_lenght));
-    #endif
-    // Copy data to buffer
-    memcpy(buffer[buffer_length], data, len);
+    accumulate_body_chunk(request, data, len, index, total);
 }
 
-/** @brief Header callback placeholder for deleting a file ("/api/fs/delete"). */
+/** @brief Handles HTTP POST DELETE request */
 static void handleFSDeleteRequest(AsyncWebServerRequest *request) {
-    // Body parsing handled in handleFSDeleteBody
-}
-
-/** @brief Handles HTTP POST body payload for deleting a LittleFS file ("/api/fs/delete"). */
-static void handleFSDeleteBody(AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total) {
-    if (!web_authenticate(request)) return;
-
-    JsonDocument doc;
-    DeserializationError err = deserializeJson(doc, (const char*)data, len);
-    if (err || !doc.containsKey("path")) {
-        request->send(400, "text/plain", "Invalid JSON payload or missing path");
+    if (!web_authenticate(request)) {
+        request->send(401, "text/plain", "Unauthorized");
         return;
     }
 
-    String path = doc["path"].as<String>();
-    if (!path.startsWith("/")) {
-        path = "/" + path;
-    }
-
-    if (!LittleFS.begin(true)) {
-        request->send(500, "text/plain", "LittleFS mount failed");
+    if (!request->hasParam("path")) {
+        request->send(400, "text/plain", "Missing 'path' parameter");
         return;
     }
 
-    if (!LittleFS.exists(path)) {
-        request->send(404, "text/plain", "File not found");
+    String path = normalize_fs_path(request->getParam("path")->value());
+
+    FsResult_t result = remove_file(path.c_str());
+    if (result != FS_OK) {
+        send_fs_error(request, result);
         return;
     }
-
-    if (LittleFS.remove(path)) {
-        request->send(200, "text/plain", "OK");
-    } else {
-        request->send(500, "text/plain", "Failed to delete file");
-    }
+    request->send(200, "text/plain", "OK");
 }
 
 /* -------------------------------------------------------------------------- */
@@ -194,5 +278,5 @@ void register_fs_routes(AsyncWebServer *server) {
     server->on("/api/fs/list", HTTP_GET, handleFSList);
     server->on("/api/fs/read", HTTP_GET, handleFSRead);
     server->on("/api/fs/save", HTTP_POST, handleFSSaveRequest, NULL, handleFSSaveBody);
-    server->on("/api/fs/delete", HTTP_POST, handleFSDeleteRequest, NULL, handleFSDeleteBody);
+    server->on("/api/fs/delete", HTTP_POST, handleFSDeleteRequest);
 }

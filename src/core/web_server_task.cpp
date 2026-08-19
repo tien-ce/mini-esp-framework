@@ -79,6 +79,9 @@ static void setupWebServer() {
     // 3. System & Config REST APIs
     register_api_routes(server);
 
+    // 4. File system
+    register_fs_routes(server);
+
     // 5. OTA Firmware Update Route
     register_ota_routes(server);
 
