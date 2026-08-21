@@ -12,11 +12,26 @@
 /* -------------------------------------------------------------------------- */
 /*                              FRAMEWORK BUILTIN FUNCTIONS                   */
 /* -------------------------------------------------------------------------- */
+static value_t *built_in_check_is_none(value_t **argv, int argc)
+{
+    if (argc != 1) {
+        ti_log("ERROR %s: Expect 1 variable \n", BUILTIN_CHECK_IS_NONE);
+        ti_fatal();
+    }
+    if (argv[0]->type == VAL_NULL)
+    {
+      return val_new_bool(true);
+    }
+    else
+    {
+      return val_new_bool(false);
+    }
+}
 
-/** @brief Built-in get_json_element function to extract an element from JSON string as a string. */
-static value_t *built_in_get_json_element(value_t **argv, int argc) {
+/** @brief Static helper to validate arguments, parse JSON string, and extract a JsonVariant for a given key. */
+static bool parse_json_and_get_element(value_t **argv, int argc, const char *func_name, JsonDocument &doc, JsonVariant &out_variant) {
     if (argc != 2 || argv[0]->type != VAL_STRING || argv[1]->type != VAL_STRING) {
-        ti_log("ERROR %s: Expect 2 string arguments (json_string, key)\n", BUILTIN_GET_JSON_ELEMENT);
+        ti_log("ERROR %s: Expect 2 string arguments (json_string, key)\n", func_name);
         ti_fatal();
     }
 
@@ -24,32 +39,76 @@ static value_t *built_in_get_json_element(value_t **argv, int argc) {
     const char *key = argv[1]->string_val;
 
     if (json_str == NULL || key == NULL) {
-        return val_new_null();
+        return false;
     }
 
-    JsonDocument doc;
     DeserializationError err = deserializeJson(doc, json_str);
     if (err) {
-        LOG_WARNING("get_json_element parse error: " + String(err.c_str()));
-        return val_new_null();
+        LOG_WARNING(String(func_name) + " parse error: " + String(err.c_str()));
+        return false;
     }
 
     if (!doc.containsKey(key) || doc[key].isNull()) {
+        return false;
+    }
+
+    out_variant = doc[key];
+    return true;
+}
+
+/** @brief Built-in get_json_as_string function to extract an element from JSON string as a string. */
+static value_t *built_in_get_json_as_string(value_t **argv, int argc) {
+    JsonDocument doc;
+    JsonVariant val;
+    if (!parse_json_and_get_element(argv, argc, BUILTIN_GET_JSON_AS_STRING, doc, val)) {
         return val_new_null();
     }
 
-    if (doc[key].is<const char*>()) {
-        return val_new_string(doc[key].as<const char*>());
+    if (val.is<const char*>()) {
+        return val_new_string(val.as<const char*>());
     }
 
-    if (doc[key].is<JsonObject>() || doc[key].is<JsonArray>()) {
+    if (val.is<JsonObject>() || val.is<JsonArray>()) {
         String json_out;
-        serializeJson(doc[key], json_out);
+        serializeJson(val, json_out);
         return val_new_string(json_out.c_str());
     }
 
-    String val_str = doc[key].as<String>();
+    String val_str = val.as<String>();
     return val_new_string(val_str.c_str());
+}
+
+/** @brief Built-in get_json_as_int function to extract an element from JSON string as an integer. */
+static value_t *built_in_get_json_as_int(value_t **argv, int argc) {
+    JsonDocument doc;
+    JsonVariant val;
+    if (!parse_json_and_get_element(argv, argc, BUILTIN_GET_JSON_AS_INT, doc, val)) {
+        return val_new_null();
+    }
+
+    return val_new_int(val.as<int>());
+}
+
+/** @brief Built-in get_json_as_float function to extract an element from JSON string as a float. */
+static value_t *built_in_get_json_as_float(value_t **argv, int argc) {
+    JsonDocument doc;
+    JsonVariant val;
+    if (!parse_json_and_get_element(argv, argc, BUILTIN_GET_JSON_AS_FLOAT, doc, val)) {
+        return val_new_null();
+    }
+
+    return val_new_float(val.as<float>());
+}
+
+/** @brief Built-in get_json_as_bool function to extract an element from JSON string as a boolean. */
+static value_t *built_in_get_json_as_bool(value_t **argv, int argc) {
+    JsonDocument doc;
+    JsonVariant val;
+    if (!parse_json_and_get_element(argv, argc, BUILTIN_GET_JSON_AS_BOOL, doc, val)) {
+        return val_new_null();
+    }
+
+    return val_new_bool(val.as<bool>());
 }
 /** @brief Built-in print function callback registered into TienInterpreter engine. */
 static value_t *built_in_print(value_t **argv, int argc) {
@@ -66,6 +125,12 @@ static value_t *built_in_print(value_t **argv, int argc) {
                 break;
             case VAL_FLOAT:
                 LOG_INFO(String(argv[i]->float_val, 2));
+                break;
+            case VAL_BOOL:
+                LOG_INFO(argv[i]->bool_val ? "true" : "false");
+                break;
+            case VAL_NULL:
+                LOG_INFO("null");
                 break;
             default:
                 ti_log("ERROR %s: Unexpected type %d\n", BUILTIN_PRINT, argv[i]->type);
@@ -246,13 +311,18 @@ void tien_init(void) {
     ti_register_log(tien_log_callback);
     ti_register_fatal(tien_fatal_callback);
 
+    register_builtin_function(BUILTIN_CHECK_IS_NONE, built_in_check_is_none);
     register_builtin_function(BUILTIN_PRINT, built_in_print);
     register_builtin_function(BUILTIN_DELAY, built_in_delay);
     register_builtin_function(BUILTIN_FILE_READ, built_in_file_read);
     register_builtin_function(BUILTIN_FILE_WRITE, built_in_file_write);
     register_builtin_function(BUILTIN_FILE_EXISTS, built_in_file_exists);
     register_builtin_function(BUILTIN_FILE_REMOVE, built_in_file_remove);
-    register_builtin_function(BUILTIN_GET_JSON_ELEMENT, built_in_get_json_element);
+    register_builtin_function(BUILTIN_GET_JSON_ELEMENT, built_in_get_json_as_string);
+    register_builtin_function(BUILTIN_GET_JSON_AS_STRING, built_in_get_json_as_string);
+    register_builtin_function(BUILTIN_GET_JSON_AS_INT, built_in_get_json_as_int);
+    register_builtin_function(BUILTIN_GET_JSON_AS_FLOAT, built_in_get_json_as_float);
+    register_builtin_function(BUILTIN_GET_JSON_AS_BOOL, built_in_get_json_as_bool);
 
     register_cmd("tien", tien_run_cmd);
 }
