@@ -1,4 +1,5 @@
 #include "core/log_task.h"
+#include "core/config_manager.h"
 #include "core/web_server_task.h"
 #include "core/core_engine.h"
 #include <Arduino.h>
@@ -110,6 +111,26 @@ static void listLogLevel(const String &arg) {
     LOG_INFO("  3 or ERROR / LOG_ERROR / LOG_LEVEL_ERROR");
 }
 
+/** @brief Saves current log level setting to NVS storage. */
+static void saveLogConfig() {
+    if (config_get_lock()) {
+        config_save_int("log", "level", (int32_t)currentLogLevel);
+        config_release_lock();
+    }
+}
+
+/** @brief Loads log level setting from NVS storage on startup. */
+static void loadLogConfig() {
+    register_config_module("log", "log");
+    if (config_get_lock()) {
+        int32_t savedLevel = config_read_int("log", "level", (int32_t)LOG_LEVEL_DEBUG);
+        if (savedLevel >= (int32_t)LOG_LEVEL_DEBUG && savedLevel <= (int32_t)LOG_LEVEL_ERROR) {
+            currentLogLevel = (LogLevel)savedLevel;
+        }
+        config_release_lock();
+    }
+}
+
 /** @brief Command handler: Sets current log severity level. */
 static void setLogLevel(const String &arg) {
     String cleanArg = arg;
@@ -120,7 +141,7 @@ static void setLogLevel(const String &arg) {
 
     // Check for numeric string ("0" - "3")
     if (cleanArg.length() == 1 && cleanArg[0] >= '0' && cleanArg[0] <= '3') {
-        level = static_cast<LogLevel>(cleanArg.toInt());
+        level = (LogLevel)cleanArg.toInt();
     } 
     // Check for string level names
     else if (cleanArg == "LOG_LEVEL_DEBUG"   || cleanArg == "LOG_DEBUG"   || cleanArg == "DEBUG")   level = LOG_LEVEL_DEBUG;
@@ -133,7 +154,8 @@ static void setLogLevel(const String &arg) {
     }
 
     currentLogLevel = level;
-    LOG_INFO("Set Log Level: " + String(currentLogLevel));
+    saveLogConfig();
+    LOG_INFO("Set Log Level: " + String(currentLogLevel) + " (" + levelToStr(currentLogLevel) + ")");
 }
 
 /** @brief Command handler: Prints current log severity level. */
@@ -301,8 +323,9 @@ void vLogTask(void *pvParameters) {
     waiting_on_event(SYSTEM_EVENT, SYS_SETUP, portMAX_DELAY);
     CommandPacket packet;
     initLogTask();
+    loadLogConfig();
     setSerialLogReady();
-    LOG_INFO("Init log task done"); 
+    LOG_INFO("Init log task done. Current level: " + levelToStr(currentLogLevel)); 
     register_cmd(CMD_SET_LOG_LEVEL, setLogLevel);
     register_cmd(CMD_GET_LOG_LEVEL, getLogLevel);
     register_cmd(CMD_LIST_LOG_LEVEL, listLogLevel);

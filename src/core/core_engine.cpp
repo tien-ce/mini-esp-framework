@@ -2,6 +2,7 @@
 #include "core/file_system.h"
 #include "core/pin_config.h"
 #include "core/dispatcher.h"
+#include "core/ti_interpreter.h"
 /* -------------------------------------------------------------------------- */
 /*                             DEFINES & CONSTANTS                            */
 /* -------------------------------------------------------------------------- */
@@ -79,6 +80,8 @@ static bool CoreState_Init(void) {
     pin_config_init();
     // 5. Init dispatcher
     dispatcher_init();
+    // Init Tien interpreter 
+    tien_init();
     // Broadcast SYS_BOOT event
     CoreState_SetMode(SYS_BOOT);
     return true;

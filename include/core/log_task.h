@@ -31,6 +31,30 @@
 #define LOG_WARNING(msg)    logPrint(String(msg), LOG_LEVEL_WARNING);
 #define LOG_ERROR(msg)      logPrint(String(msg), LOG_LEVEL_ERROR);
 
+/* Logging Helper for C string */
+#define LOG_DEBUG_STR(fmt, ...) do { \
+    char _log_buf[256]; \
+    snprintf(_log_buf, sizeof(_log_buf), fmt, ##__VA_ARGS__); \
+    LOG_DEBUG(String(_log_buf)); \
+} while(0)
+
+#define LOG_INFO_STR(fmt, ...) do { \
+    char _log_buf[256]; \
+    snprintf(_log_buf, sizeof(_log_buf), fmt, ##__VA_ARGS__); \
+    LOG_INFO(String(_log_buf)); \
+} while(0)
+
+#define LOG_WARNING_STR(fmt, ...) do { \
+    char _log_buf[256]; \
+    snprintf(_log_buf, sizeof(_log_buf), fmt, ##__VA_ARGS__); \
+    LOG_WARNING(String(_log_buf)); \
+} while(0)
+
+#define LOG_ERROR_STR(fmt, ...) do { \
+    char _log_buf[256]; \
+    snprintf(_log_buf, sizeof(_log_buf), fmt, ##__VA_ARGS__); \
+    LOG_ERROR(String(_log_buf)); \
+} while(0)
 /* -------------------------------------------------------------------------- */
 /*                             ENUMS & DATA TYPES                             */
 /* -------------------------------------------------------------------------- */
