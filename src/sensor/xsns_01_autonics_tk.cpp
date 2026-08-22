@@ -3,14 +3,52 @@
 #include <Arduino.h>
 #include "core/core_engine.h"
 #include "modbus.h"
+#include "built_in.h"
+#include "TienInterpreter.h"
 
-#define SLAVE_ID            0x01
 #define START_REG_ADDR      0x03E8
 #define REG_COUNT           6     
 #define READ_INPUT_REG      0x04 
 
-static char pv_str[16];
-static char sv_str[16];
+static uint8_t s_slave_id = 0x01;
+static char pv_str[16] = "-1";
+static char sv_str[16] = "-1";
+static float s_last_pv = 0.0f;
+static float s_last_sv = 0.0f;
+
+/* -------------------------------------------------------------------------- */
+/*                        INTERPRETER BUILT-IN FUNCTIONS                      */
+/* -------------------------------------------------------------------------- */
+
+/** @brief Built-in autonics_tk_set_slave_address function setting target Modbus slave address. */
+static value_t *built_in_autonics_tk_set_slave_address(value_t **argv, int argc) {
+    if (argc != 1 || argv == NULL || argv[0] == NULL || argv[0]->type != VAL_INT) {
+        ti_log("[ERROR] %s: Expect 1 integer argument (slave_address 1-247)\n", BUILTIN_AUTONICS_TK_SET_SLAVE_ADDRESS);
+        ti_fatal();
+    }
+    int addr = argv[0]->int_val;
+    if (addr < 1 || addr > 247) {
+        ti_log("[ERROR] %s: Invalid slave address %d (range 1-247)\n", BUILTIN_AUTONICS_TK_SET_SLAVE_ADDRESS, addr);
+        ti_fatal();
+    }
+    s_slave_id = (uint8_t)addr;
+    LOG_INFO("Autonics TK slave address set to " + String(s_slave_id));
+    return val_new_bool(true);
+}
+
+/** @brief Built-in autonics_tk_get_pv function returning latest cached Process Value (PV). */
+static value_t *built_in_autonics_tk_get_pv(value_t **argv, int argc) {
+    (void)argv;
+    (void)argc;
+    return val_new_float(s_last_pv);
+}
+
+/** @brief Built-in autonics_tk_get_sv function returning latest cached Set Value (SV). */
+static value_t *built_in_autonics_tk_get_sv(value_t **argv, int argc) {
+    (void)argv;
+    (void)argc;
+    return val_new_float(s_last_sv);
+}
 
 struct AutonicsTKData {
     uint16_t raw_pv;
@@ -78,7 +116,7 @@ static bool CheckRS485PinConfig() {
 }
 
 static void ProcessModbusPoll() {
-    SendRetType ret = ModbusSend(SLAVE_ID, READ_INPUT_REG, START_REG_ADDR, REG_COUNT, 200);
+    SendRetType ret = ModbusSend(s_slave_id, READ_INPUT_REG, START_REG_ADDR, REG_COUNT, 200);
     if (ret == ESEND_NOERR) {
         UCHAR rx_buf[256];
         USHORT rx_len = 0;
@@ -93,6 +131,8 @@ static void ProcessModbusPoll() {
         ParseTKRegisters(rx_buf, rx_len, &data);
         FormatValueWithDecimal(data.raw_pv, data.decimal_point, pv_str, sizeof(pv_str));
         FormatValueWithDecimal(data.raw_sv, data.decimal_point, sv_str, sizeof(sv_str));
+        s_last_pv = (float)atof(pv_str);
+        s_last_sv = (float)atof(sv_str);
         const char* unit_str = GetUnitString(data.unit_code);
 
         // Push Telemetry directly to web REST API
@@ -103,12 +143,18 @@ static void ProcessModbusPoll() {
         LOG_WARNING("[Xdrv2] Failed to parse Modbus registers.");
         snprintf(pv_str, sizeof(pv_str), "-1");
         snprintf(sv_str, sizeof(sv_str), "-1");
+        s_last_pv = -1.0f;
+        s_last_sv = -1.0f;
     }
 }
 
 bool Xsns1(Signal_t signal) {
     switch (signal) {
         case SIG_INIT: {
+            register_builtin_function(BUILTIN_AUTONICS_TK_SET_SLAVE_ADDRESS, built_in_autonics_tk_set_slave_address);
+            register_builtin_function(BUILTIN_AUTONICS_TK_GET_PV, built_in_autonics_tk_get_pv);
+            register_builtin_function(BUILTIN_AUTONICS_TK_GET_SV, built_in_autonics_tk_get_sv);
+
             if (!CheckRS485PinConfig()) {
                 return false;
             }

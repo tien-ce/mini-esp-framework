@@ -2,6 +2,8 @@
 #ifdef USE_RELAY
 #include <Arduino.h>
 #include "core/core_engine.h"
+#include "built_in.h"
+#include "TienInterpreter.h"
 
 #define MAX_RELAYS 3
 
@@ -12,6 +14,78 @@ typedef struct {
 } RelayConfig_t;
 
 static RelayConfig_t s_relays[MAX_RELAYS];
+
+/* -------------------------------------------------------------------------- */
+/*                        INTERPRETER BUILT-IN FUNCTIONS                      */
+/* -------------------------------------------------------------------------- */
+
+/** @brief Built-in relay_get_state function returning relay state (1 for ON, 0 for OFF). */
+static value_t *built_in_relay_get_state(value_t **argv, int argc) {
+    if (argc != 1 || argv == NULL || argv[0] == NULL || argv[0]->type != VAL_INT) {
+        ti_log("[ERROR] %s: Expect 1 integer argument (relay_number 1-%d)\n", BUILTIN_RELAY_GET_STATE, MAX_RELAYS);
+        ti_fatal();
+    }
+    int relay_num = argv[0]->int_val;
+    int idx = -1;
+    if (relay_num >= 1 && relay_num <= MAX_RELAYS) {
+        idx = relay_num - 1;
+    } else if (relay_num == 0) {
+        idx = 0;
+    } else {
+        ti_log("[ERROR] %s: Relay number %d out of range (1-%d)\n", BUILTIN_RELAY_GET_STATE, relay_num, MAX_RELAYS);
+        ti_fatal();
+    }
+
+    if (!s_relays[idx].active) {
+        LOG_WARNING("Relay" + String(idx + 1) + " is not active/configured");
+        return val_new_int(0);
+    }
+
+    int state = (digitalRead(s_relays[idx].pin) == HIGH) ? 1 : 0;
+    return val_new_int(state);
+}
+
+/** @brief Built-in relay_set_state function setting relay state (accepts int, bool, or string ON/OFF). */
+static value_t *built_in_relay_set_state(value_t **argv, int argc) {
+    if (argc != 2 || argv == NULL || argv[0] == NULL || argv[1] == NULL || argv[0]->type != VAL_INT) {
+        ti_log("[ERROR] %s: Expect 2 arguments (relay_number, state)\n", BUILTIN_RELAY_SET_STATE);
+        ti_fatal();
+    }
+    int relay_num = argv[0]->int_val;
+    int idx = -1;
+    if (relay_num >= 1 && relay_num <= MAX_RELAYS) {
+        idx = relay_num - 1;
+    } else if (relay_num == 0) {
+        idx = 0;
+    } else {
+        ti_log("[ERROR] %s: Relay number %d out of range (1-%d)\n", BUILTIN_RELAY_SET_STATE, relay_num, MAX_RELAYS);
+        ti_fatal();
+    }
+
+    if (!s_relays[idx].active) {
+        LOG_WARNING("Relay" + String(idx + 1) + " is not active/configured");
+        return val_new_bool(false);
+    }
+
+    bool targetState = false;
+    if (argv[1]->type == VAL_INT) {
+        targetState = (argv[1]->int_val != 0);
+    } else if (argv[1]->type == VAL_BOOL) {
+        targetState = argv[1]->bool_val;
+    } else if (argv[1]->type == VAL_STRING && argv[1]->string_val != NULL) {
+        String s = argv[1]->string_val;
+        s.trim();
+        s.toUpperCase();
+        targetState = (s == "1" || s == "ON" || s == "TRUE" || s == "HIGH");
+    } else {
+        ti_log("[ERROR] %s: Invalid state argument type %d\n", BUILTIN_RELAY_SET_STATE, argv[1]->type);
+        ti_fatal();
+    }
+
+    digitalWrite(s_relays[idx].pin, targetState ? HIGH : LOW);
+    LOG_INFO(s_relays[idx].name + " set to " + (targetState ? "ON" : "OFF"));
+    return val_new_bool(true);
+}
 
 /**
  * @brief Control handler execution for relay commands.
@@ -45,6 +119,8 @@ bool Xdrv2(Signal_t signal) {
     switch (signal) {
         case SIG_INIT: {
             uint8_t used_count = 0;
+            register_builtin_function(BUILTIN_RELAY_GET_STATE, built_in_relay_get_state);
+            register_builtin_function(BUILTIN_RELAY_SET_STATE, built_in_relay_set_state);
 
             for (uint8_t i = 0; i < MAX_RELAYS; i++) {
                 String relay_name = "Relay" + String(i + 1);

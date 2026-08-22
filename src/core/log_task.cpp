@@ -2,6 +2,8 @@
 #include "core/config_manager.h"
 #include "core/web_server_task.h"
 #include "core/core_engine.h"
+#include "built_in.h"
+#include "TienInterpreter.h"
 #include <Arduino.h>
 #include <unordered_map>
 
@@ -46,11 +48,54 @@ static std::unordered_map<String, CommandHandlerFunc, StringHash> commandMap;
 /*                              STATIC FUNCTIONS                              */
 /* -------------------------------------------------------------------------- */
 
+/* -------------------------------------------------------------------------- */
+/*                        INTERPRETER BUILT-IN FUNCTIONS                      */
+/* -------------------------------------------------------------------------- */
+
+/** @brief Built-in print function callback registered into TienInterpreter engine. */
+static value_t *built_in_print(value_t **argv, int argc) {
+    if (argc == 0) {
+        LOG_INFO("\n");
+        return init_val(VAL_NULL);
+    }
+    if (argv == NULL) {
+        return init_val(VAL_NULL);
+    }
+    for (int i = 0; i < argc; i++) {
+        if (argv[i] == NULL) {
+            LOG_INFO("null");
+            continue;
+        }
+        switch (argv[i]->type) {
+            case VAL_STRING:
+                LOG_INFO(argv[i]->string_val ? String(argv[i]->string_val) : "null");
+                break;
+            case VAL_INT:
+                LOG_INFO(String(argv[i]->int_val));
+                break;
+            case VAL_FLOAT:
+                LOG_INFO(String(argv[i]->float_val, 2));
+                break;
+            case VAL_BOOL:
+                LOG_INFO(argv[i]->bool_val ? "true" : "false");
+                break;
+            case VAL_NULL:
+                LOG_INFO("null");
+                break;
+            default:
+                ti_log("[ERROR] %s: Unexpected type %d\n", BUILTIN_PRINT, argv[i]->type);
+                ti_fatal();
+                break;
+        }
+    }
+    return init_val(VAL_NULL);
+}
+
 /** @brief Command handler: Restarts system. */
 static void esp32_restart(const String &arg) {
     LOG_INFO("Received restart command, logging and restarting system");
     LOG_INFO("System restarting........");
-    vTaskDelay(1000);
+    vTaskDelay(200);
     ESP.restart();
 }
 
@@ -183,9 +228,9 @@ static void processHardwareSerialInput() {
 #endif
 
 /**
- * @brief Initializes Serial interface, sets serial output ready, and registers default log commands.
+ * @brief Initializes Serial interface and creates logging mutex & command queue.
  */
-static void initLogTask() {
+void log_task_init(void) {
     if (logMutex == NULL) {
         logMutex = xSemaphoreCreateMutex();
     }
@@ -233,36 +278,31 @@ void logPrint(const String &msg, LogLevel level) {
     if (level < currentLogLevel) 
         return;
 
-    bool serial_ready = (CoreState_GetMode() >= SYS_NORMAL);
     WebServerState_t webState = CoreState_GetWebServer();
     bool web_ready = (webState == WEB_STATE_LISTENING || webState == WEB_STATE_CLIENT_CONNECTED);
 
     if (logMutex != NULL && xSemaphoreTake(logMutex, portMAX_DELAY) == true) {
         switch (level) {
             case LOG_LEVEL_DEBUG:
-                if (serial_ready)
-                    Serial.println(String(LOG_COLOR_BLUE) + msg + LOG_COLOR_RESET);
+                Serial.println(String(LOG_COLOR_BLUE) + msg + LOG_COLOR_RESET);
                 if (web_ready)
                     ws.textAll(String(WEB_COLOR_WHITE) + msg + WEB_COLOR_RESET);
                 break;
 
             case LOG_LEVEL_INFO:
-                if (serial_ready)
-                    Serial.println(String(LOG_COLOR_GREEN) + msg + LOG_COLOR_RESET);
+                Serial.println(String(LOG_COLOR_GREEN) + msg + LOG_COLOR_RESET);
                 if (web_ready)
                     ws.textAll(String(WEB_COLOR_GREEN) + msg + WEB_COLOR_RESET);
                 break;
 
             case LOG_LEVEL_WARNING:
-                if (serial_ready)
-                    Serial.println(String(LOG_COLOR_YELLOW) + msg + LOG_COLOR_RESET);
+                Serial.println(String(LOG_COLOR_YELLOW) + msg + LOG_COLOR_RESET);
                 if (web_ready)
                     ws.textAll(String(WEB_COLOR_YELLOW) + msg + WEB_COLOR_RESET);
                 break;
 
             case LOG_LEVEL_ERROR:
-                if (serial_ready)
-                    Serial.println(String(LOG_COLOR_RED) + msg + LOG_COLOR_RESET);
+                Serial.println(String(LOG_COLOR_RED) + msg + LOG_COLOR_RESET);
                 if (web_ready)
                     ws.textAll(String(WEB_COLOR_RED) + msg + WEB_COLOR_RESET);
                 break;
@@ -271,6 +311,8 @@ void logPrint(const String &msg, LogLevel level) {
                 break;
         }
         xSemaphoreGive(logMutex);
+    } else {
+        Serial.println(msg);
     }
 }
 
@@ -322,7 +364,6 @@ void vLogTask(void *pvParameters) {
     /* Wait until core engine is done */
     waiting_on_event(SYSTEM_EVENT, SYS_SETUP, portMAX_DELAY);
     CommandPacket packet;
-    initLogTask();
     loadLogConfig();
     setSerialLogReady();
     LOG_INFO("Init log task done. Current level: " + levelToStr(currentLogLevel)); 
@@ -330,6 +371,7 @@ void vLogTask(void *pvParameters) {
     register_cmd(CMD_GET_LOG_LEVEL, getLogLevel);
     register_cmd(CMD_LIST_LOG_LEVEL, listLogLevel);
     register_cmd(CMD_RESTART, esp32_restart);
+    register_builtin_function(BUILTIN_PRINT, built_in_print);
     LOG_INFO("vLogTask started, sleeping until command arrives...");
     for (;;) {
 #if !(defined(ARDUINO_USB_CDC_ON_BOOT) && (ARDUINO_USB_CDC_ON_BOOT > 0))

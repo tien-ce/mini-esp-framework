@@ -5,6 +5,7 @@
 #include "built_in.h"
 #include "TienInterpreter.h"
 #include <LittleFS.h>
+#include <HTTPClient.h>
 #include <stddef.h>
 #include <string.h>
 #include <ArduinoJson.h>
@@ -12,13 +13,13 @@
 /* -------------------------------------------------------------------------- */
 /*                              FRAMEWORK BUILTIN FUNCTIONS                   */
 /* -------------------------------------------------------------------------- */
-static value_t *built_in_check_is_none(value_t **argv, int argc)
+static value_t *built_in_is_none(value_t **argv, int argc)
 {
-    if (argc != 1) {
-        ti_log("ERROR %s: Expect 1 variable \n", BUILTIN_CHECK_IS_NONE);
+    if (argc != 1 || argv == NULL) {
+        ti_log("[ERROR] %s: Expect 1 variable \n", BUILTIN_IS_NONE);
         ti_fatal();
     }
-    if (argv[0]->type == VAL_NULL)
+    if (argv[0] == NULL || argv[0]->type == VAL_NULL)
     {
       return val_new_bool(true);
     }
@@ -30,8 +31,8 @@ static value_t *built_in_check_is_none(value_t **argv, int argc)
 
 /** @brief Static helper to validate arguments, parse JSON string, and extract a JsonVariant for a given key. */
 static bool parse_json_and_get_element(value_t **argv, int argc, const char *func_name, JsonDocument &doc, JsonVariant &out_variant) {
-    if (argc != 2 || argv[0]->type != VAL_STRING || argv[1]->type != VAL_STRING) {
-        ti_log("ERROR %s: Expect 2 string arguments (json_string, key)\n", func_name);
+    if (argc != 2 || argv == NULL || argv[0] == NULL || argv[1] == NULL || argv[0]->type != VAL_STRING || argv[1]->type != VAL_STRING) {
+        ti_log("[ERROR] %s: Expect 2 string arguments (json_string, key)\n", func_name);
         ti_fatal();
     }
 
@@ -54,6 +55,39 @@ static bool parse_json_and_get_element(value_t **argv, int argc, const char *fun
 
     out_variant = doc[key];
     return true;
+}
+
+/** @brief Built-in get_json function to extract an element from JSON string with its native type. */
+static value_t *built_in_get_json(value_t **argv, int argc) {
+    JsonDocument doc;
+    JsonVariant val;
+    if (!parse_json_and_get_element(argv, argc, BUILTIN_GET_JSON, doc, val)) {
+        return val_new_null();
+    }
+
+    if (val.isNull()) {
+        return val_new_null();
+    }
+    if (val.is<bool>()) {
+        return val_new_bool(val.as<bool>());
+    }
+    if (val.is<int>()) {
+        return val_new_int(val.as<int>());
+    }
+    if (val.is<float>()) {
+        return val_new_float(val.as<float>());
+    }
+    if (val.is<const char*>()) {
+        return val_new_string(val.as<const char*>());
+    }
+    if (val.is<JsonObject>() || val.is<JsonArray>()) {
+        String json_out;
+        serializeJson(val, json_out);
+        return val_new_string(json_out.c_str());
+    }
+
+    String val_str = val.as<String>();
+    return val_new_string(val_str.c_str());
 }
 
 /** @brief Built-in get_json_as_string function to extract an element from JSON string as a string. */
@@ -110,41 +144,10 @@ static value_t *built_in_get_json_as_bool(value_t **argv, int argc) {
 
     return val_new_bool(val.as<bool>());
 }
-/** @brief Built-in print function callback registered into TienInterpreter engine. */
-static value_t *built_in_print(value_t **argv, int argc) {
-    if (argc == 0) {
-        LOG_INFO("\n");
-    }
-    for (int i = 0; i < argc; i++) {
-        switch (argv[i]->type) {
-            case VAL_STRING:
-                LOG_INFO(String(argv[i]->string_val));
-                break;
-            case VAL_INT:
-                LOG_INFO(String(argv[i]->int_val));
-                break;
-            case VAL_FLOAT:
-                LOG_INFO(String(argv[i]->float_val, 2));
-                break;
-            case VAL_BOOL:
-                LOG_INFO(argv[i]->bool_val ? "true" : "false");
-                break;
-            case VAL_NULL:
-                LOG_INFO("null");
-                break;
-            default:
-                ti_log("ERROR %s: Unexpected type %d\n", BUILTIN_PRINT, argv[i]->type);
-                ti_fatal();
-                break;
-        }
-    }
-    return init_val(VAL_NULL);
-}
-
 /** @brief Built-in delay function to pause script execution for N milliseconds. */
 static value_t *built_in_delay(value_t **argv, int argc) {
-    if (argc != 1) {
-        ti_log("ERROR %s: Invalid argument count, expect 1\n", BUILTIN_DELAY);
+    if (argc != 1 || argv == NULL || argv[0] == NULL) {
+        ti_log("[ERROR] %s: Invalid argument count, expect 1\n", BUILTIN_DELAY);
         ti_fatal();
     }
     switch (argv[0]->type) {
@@ -159,62 +162,92 @@ static value_t *built_in_delay(value_t **argv, int argc) {
             }
             break;
         default:
-            ti_log("ERROR %s: Unexpected type %d\n", BUILTIN_DELAY, argv[0]->type);
+            ti_log("[ERROR] %s: Unexpected type %d\n", BUILTIN_DELAY, argv[0]->type);
             ti_fatal();
             break;
     }
     return init_val(VAL_NULL);
 }
 
-/** @brief Built-in file_read function to read entire text file from LittleFS into a string. */
-static value_t *built_in_file_read(value_t **argv, int argc) {
-    if (argc != 1 || argv[0]->type != VAL_STRING) {
-        ti_log("ERROR %s: Expect 1 string argument (file path)\n", BUILTIN_FILE_READ);
+/** @brief Built-in http_get function executing HTTP GET and returning JSON string with code and payload. */
+static value_t *built_in_http_get(value_t **argv, int argc) {
+    if (argc != 1 || argv == NULL || argv[0] == NULL || argv[0]->type != VAL_STRING || argv[0]->string_val == NULL) {
+        ti_log("[ERROR] %s: Expect 1 string argument (url)\n", BUILTIN_HTTP_GET);
         ti_fatal();
     }
-    char *buffer = NULL;
-    size_t read_bytes = 0;
-    FsResult_t ret = read_file(argv[0]->string_val, &buffer, &read_bytes);
-    if (ret != FS_OK || buffer == NULL) {
-        return val_new_null();
+
+    HTTPClient http;
+    http.setTimeout(500);
+    bool beginOk = http.begin(argv[0]->string_val);
+    int httpCode = -1;
+    String response = "";
+
+    if (!beginOk) {
+        httpCode = -1;
+        response = "Failed to parse URL or initialize client";
+    } else {
+        httpCode = http.GET();
+        if (httpCode > 0) {
+            response = http.getString();
+        } else {
+            response = http.errorToString(httpCode);
+        }
+        http.end();
     }
-    value_t *result = val_new_string(buffer);
-    free(buffer);
-    return result;
+
+    JsonDocument doc;
+    doc["code"] = httpCode;
+    doc["payload"] = response;
+
+    String out;
+    serializeJson(doc, out);
+    return val_new_string(out.c_str());
 }
 
-/** @brief Built-in file_write function to overwrite content to a LittleFS file. */
-static value_t *built_in_file_write(value_t **argv, int argc) {
-    if (argc != 2 || argv[0]->type != VAL_STRING || argv[1]->type != VAL_STRING) {
-        ti_log("ERROR %s: Expect 2 string arguments (file path, content)\n", BUILTIN_FILE_WRITE);
+/** @brief Built-in http_post function executing HTTP POST and returning JSON string with code and payload. */
+static value_t *built_in_http_post(value_t **argv, int argc) {
+    if (argc < 2 || argc > 3 || argv == NULL || argv[0] == NULL || argv[1] == NULL ||
+        argv[0]->type != VAL_STRING || argv[1]->type != VAL_STRING ||
+        argv[0]->string_val == NULL || argv[1]->string_val == NULL) {
+        ti_log("[ERROR] %s: Expect 2 or 3 string arguments (url, data, [content_type])\n", BUILTIN_HTTP_POST);
         ti_fatal();
     }
-    const char *path = argv[0]->string_val;
-    const char *data = argv[1]->string_val;
-    unsigned int written = 0;
-    FsResult_t ret = write_file(path, data, (unsigned int)strlen(data), &written);
-    return val_new_bool(ret == FS_OK);
+
+    if (argc == 3 && (argv[2] == NULL || argv[2]->type != VAL_STRING || argv[2]->string_val == NULL)) {
+        ti_log("[ERROR] %s: Argument 3 must be a valid string (content_type)\n", BUILTIN_HTTP_POST);
+        ti_fatal();
+    }
+
+    HTTPClient http;
+    http.setTimeout(5000);
+    bool beginOk = http.begin(argv[0]->string_val);
+    int httpCode = -1;
+    String response = "";
+
+    if (!beginOk) {
+        httpCode = -1;
+        response = "Failed to parse URL or initialize client";
+    } else {
+        const char *contentType = (argc == 3) ? argv[2]->string_val : "application/json";
+        http.addHeader("Content-Type", contentType);
+        httpCode = http.POST((uint8_t*)argv[1]->string_val, strlen(argv[1]->string_val));
+        if (httpCode > 0) {
+            response = http.getString();
+        } else {
+            response = http.errorToString(httpCode);
+        }
+        http.end();
+    }
+
+    JsonDocument doc;
+    doc["code"] = httpCode;
+    doc["payload"] = response;
+
+    String out;
+    serializeJson(doc, out);
+    return val_new_string(out.c_str());
 }
 
-/** @brief Built-in file_exists function to check if a file exists on LittleFS. */
-static value_t *built_in_file_exists(value_t **argv, int argc) {
-    if (argc != 1 || argv[0]->type != VAL_STRING) {
-        ti_log("ERROR %s: Expect 1 string argument (file path)\n", BUILTIN_FILE_EXISTS);
-        ti_fatal();
-    }
-    bool exists = LittleFS.exists(argv[0]->string_val);
-    return val_new_bool(exists);
-}
-
-/** @brief Built-in file_remove function to delete a file from LittleFS. */
-static value_t *built_in_file_remove(value_t **argv, int argc) {
-    if (argc != 1 || argv[0]->type != VAL_STRING) {
-        ti_log("ERROR %s: Expect 1 string argument (file path)\n", BUILTIN_FILE_REMOVE);
-        ti_fatal();
-    }
-    FsResult_t ret = remove_file(argv[0]->string_val);
-    return val_new_bool(ret == FS_OK);
-}
 /* -------------------------------------------------------------------------- */
 /*                              STATIC FUNCTIONS                              */
 /* -------------------------------------------------------------------------- */
@@ -311,14 +344,11 @@ void tien_init(void) {
     ti_register_log(tien_log_callback);
     ti_register_fatal(tien_fatal_callback);
 
-    register_builtin_function(BUILTIN_CHECK_IS_NONE, built_in_check_is_none);
-    register_builtin_function(BUILTIN_PRINT, built_in_print);
+    register_builtin_function(BUILTIN_IS_NONE, built_in_is_none);
     register_builtin_function(BUILTIN_DELAY, built_in_delay);
-    register_builtin_function(BUILTIN_FILE_READ, built_in_file_read);
-    register_builtin_function(BUILTIN_FILE_WRITE, built_in_file_write);
-    register_builtin_function(BUILTIN_FILE_EXISTS, built_in_file_exists);
-    register_builtin_function(BUILTIN_FILE_REMOVE, built_in_file_remove);
-    register_builtin_function(BUILTIN_GET_JSON_ELEMENT, built_in_get_json_as_string);
+    register_builtin_function(BUILTIN_HTTP_GET, built_in_http_get);
+    register_builtin_function(BUILTIN_HTTP_POST, built_in_http_post);
+    register_builtin_function(BUILTIN_GET_JSON, built_in_get_json);
     register_builtin_function(BUILTIN_GET_JSON_AS_STRING, built_in_get_json_as_string);
     register_builtin_function(BUILTIN_GET_JSON_AS_INT, built_in_get_json_as_int);
     register_builtin_function(BUILTIN_GET_JSON_AS_FLOAT, built_in_get_json_as_float);

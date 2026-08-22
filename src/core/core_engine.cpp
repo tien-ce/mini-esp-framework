@@ -3,6 +3,7 @@
 #include "core/pin_config.h"
 #include "core/dispatcher.h"
 #include "core/ti_interpreter.h"
+#include "core/log_task.h"
 /* -------------------------------------------------------------------------- */
 /*                             DEFINES & CONSTANTS                            */
 /* -------------------------------------------------------------------------- */
@@ -56,32 +57,44 @@ static void UpdateDomainBits(Event_t type, uint8_t new_state) {
 
 /** @brief Initializes state matrix mutex and event group. */
 static bool CoreState_Init(void) {
-    // 1. Allocate FreeRTOS synchronization primitives
+    // 1. Initialize Serial & Logging hardware immediately for early boot visibility
+    log_task_init();
+
+    // 2. Allocate FreeRTOS synchronization primitives
     g_state_mutex = xSemaphoreCreateMutex();
     g_state_event_group = xEventGroupCreate();
 
     if (g_state_mutex == NULL || g_state_event_group == NULL)
         return false;
-    // 2. Set initial memory state
+
+    // 3. Set initial memory state
     g_state_matrix.mode = SYS_BOOT;
     g_state_matrix.network = NET_STATE_DISCONNECTED;
     g_state_matrix.web = WEB_STATE_STOPPED;
     g_state_matrix.mqtt = MQTT_STATE_DISCONNECTED;
     g_state_matrix.storage_ok = false;
     g_state_matrix.last_update = xTaskGetTickCount();
-    // 3. Init config manager (NVS / Preferences)
+
+    LOG_INFO("=== System Booting (SYS_BOOT) ===");
+
+    // 4. Init config manager (NVS / Preferences)
     config_manager_init();
-    // Init file system  
+
+    // 5. Init file system  
     if(!file_system_init())
     {
         file_system_format();
     }
-    // 4. Init pin config system (loads pin mappings from NVS)
+
+    // 6. Init pin config system (loads pin mappings from NVS)
     pin_config_init();
-    // 5. Init dispatcher
+
+    // 7. Init dispatcher
     dispatcher_init();
-    // Init Tien interpreter 
+
+    // 8. Init Tien interpreter 
     tien_init();
+
     // Broadcast SYS_BOOT event
     CoreState_SetMode(SYS_BOOT);
     return true;
