@@ -33,6 +33,7 @@ static const char* AVAILABLE_PIN_OPTIONS[] = {
     "Relay1",
     "Relay2",
     "Relay3",
+    "Relay4",
     "PWM / LED",
     "I2C SDA",
     "I2C SCL",
@@ -51,6 +52,30 @@ struct BoardPinDef {
     bool isFixed;
 };
 
+#if defined(BOARD_ESP32S3_PLC_MINI)
+static const BoardPinDef BOARD_PINS[] = {
+    {6, "GPIO6", "Relay1",false},
+    {7, "GPIO7", "Relay2",false},
+    {15, "GPIO15", "Relay3",false},
+    {16, "GPIO16", "Relay4",false},
+    /* Default RS485 Pins for esp32-rs485-can*/
+    {17, "GPIO17", "RS485_TX",false},
+    {18, "GPIO18", "RS485_RX",false},
+    {37, "GPIO37", "None", false},
+    {38, "GPIO38", "None", false},
+    {39, "GPIO39", "None", false},
+    {40, "GPIO40", "None", false},
+    {41, "GPIO41", "None", false},
+    {42, "GPIO42", "None", false},
+    {43, "GPIO43", "None", false},
+    {44, "GPIO44", "None", false},
+    {45, "GPIO45", "None", false},
+    {46, "GPIO46", "None", false},
+    {47, "GPIO47", "None", false},
+    {48, "GPIO48", "None", false},
+    {49, "GPIO49", "None", false},
+};
+#elif defined(BOARD_ESP32S3_RS485_CAN)
 static const BoardPinDef BOARD_PINS[] = {
     {0,  "GPIO0",  "None",        false},
     {1,  "GPIO1",  "None",        false},
@@ -69,12 +94,12 @@ static const BoardPinDef BOARD_PINS[] = {
     {15, "GPIO15", "None",        false},
     {16, "GPIO16", "None",        false},
     /* Default RS485 Pins for esp32-rs485-can*/
-    {17, "GPIO17", "None",    false},
-    {18, "GPIO18", "None",    false},
-    {21, "GPIO21", "None",    false},
-
-    {47, "GPIO47", "None",        false}
+    {17, "GPIO17", "RS485_TX",    false},
+    {18, "GPIO18", "RS485_RX",    false},
+    {21, "GPIO21", "RS485_DE",    false},
 };
+#endif
+
 #define BOARD_PIN_COUNT (sizeof(BOARD_PINS) / sizeof(BOARD_PINS[0]))
 
 /* -------------------------------------------------------------------------- */

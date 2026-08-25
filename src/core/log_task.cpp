@@ -55,32 +55,33 @@ static std::unordered_map<String, CommandHandlerFunc, StringHash> commandMap;
 /** @brief Built-in print function callback registered into TienInterpreter engine. */
 static value_t *built_in_print(value_t **argv, int argc) {
     if (argc == 0) {
-        LOG_INFO("\n");
+        LOG_INFO("");
         return init_val(VAL_NULL);
     }
     if (argv == NULL) {
         return init_val(VAL_NULL);
     }
+    String buffer = "";
     for (int i = 0; i < argc; i++) {
         if (argv[i] == NULL) {
-            LOG_INFO("null");
+            buffer += "null";
             continue;
         }
         switch (argv[i]->type) {
             case VAL_STRING:
-                LOG_INFO(argv[i]->string_val ? String(argv[i]->string_val) : "null");
+                buffer += (argv[i]->string_val ? String(argv[i]->string_val) : "null");
                 break;
             case VAL_INT:
-                LOG_INFO(String(argv[i]->int_val));
+                buffer += String(argv[i]->int_val);
                 break;
             case VAL_FLOAT:
-                LOG_INFO(String(argv[i]->float_val, 2));
+                buffer += String(argv[i]->float_val, 2);
                 break;
             case VAL_BOOL:
-                LOG_INFO(argv[i]->bool_val ? "true" : "false");
+                buffer += (argv[i]->bool_val ? "true" : "false");
                 break;
             case VAL_NULL:
-                LOG_INFO("null");
+                buffer += "null";
                 break;
             default:
                 ti_log("[ERROR] %s: Unexpected type %d\n", BUILTIN_PRINT, argv[i]->type);
@@ -88,6 +89,7 @@ static value_t *built_in_print(value_t **argv, int argc) {
                 break;
         }
     }
+    LOG_INFO(buffer);
     return init_val(VAL_NULL);
 }
 
@@ -95,7 +97,7 @@ static value_t *built_in_print(value_t **argv, int argc) {
 static void esp32_restart(const String &arg) {
     LOG_INFO("Received restart command, logging and restarting system");
     LOG_INFO("System restarting........");
-    vTaskDelay(200);
+    vTaskDelay(1000);
     ESP.restart();
 }
 
@@ -110,6 +112,37 @@ static String levelToStr(LogLevel level) {
     }
 }
 
+/** @brief Command handler: Executes multiple semicolon-separated commands sequentially. */
+static void backlogHandler(const String &arg) {
+    if (arg.length() == 0) {
+        LOG_WARNING("Backlog: No commands provided. Format: Backlog <cmd1:arg1>; <cmd2:arg2>; ...");
+        return;
+    }
+
+    LOG_INFO("Processing Backlog: " + arg);
+
+    int startIdx = 0;
+    int len = arg.length();
+
+    while (startIdx < len) {
+        int semiIdx = arg.indexOf(';', startIdx);
+        String subCmd = "";
+        if (semiIdx != -1) {
+            subCmd = arg.substring(startIdx, semiIdx);
+            startIdx = semiIdx + 1;
+        } else {
+            subCmd = arg.substring(startIdx);
+            startIdx = len;
+        }
+
+        subCmd.trim();
+        if (subCmd.length() > 0) {
+            LOG_DEBUG("Backlog posting sub-command: " + subCmd);
+            postIncomingCommand(subCmd);
+        }
+    }
+}
+
 /** @brief Parses raw command string and executes matching registered handler. */
 static void execute_cmd(const String &raw_cmd) {
     LOG_DEBUG("Raw command received: " + raw_cmd);
@@ -117,14 +150,75 @@ static void execute_cmd(const String &raw_cmd) {
     String cleanCmd = raw_cmd;
     cleanCmd.trim();
 
+    // Strip leading prompt characters (e.g. ">>> ") if copied from terminal
+    while (cleanCmd.startsWith(">")) {
+        cleanCmd = cleanCmd.substring(1);
+        cleanCmd.trim();
+    }
+
+    // Strip ANSI escape codes (e.g. \033[0m)
+    while (true) {
+        int escIdx = cleanCmd.indexOf('\033');
+        if (escIdx == -1) break;
+        int mIdx = cleanCmd.indexOf('m', escIdx);
+        if (mIdx != -1) {
+            cleanCmd = cleanCmd.substring(0, escIdx) + cleanCmd.substring(mIdx + 1);
+        } else {
+            cleanCmd = cleanCmd.substring(0, escIdx);
+        }
+    }
+    cleanCmd.trim();
+
+    // Strip trailing semicolons
+    while (cleanCmd.endsWith(";")) {
+        cleanCmd = cleanCmd.substring(0, cleanCmd.length() - 1);
+        cleanCmd.trim();
+    }
+
+    if (cleanCmd.length() == 0) return;
+
+    // Check if the command starts with BACKLOG (with or without colon/space)
+    String upperCmd = cleanCmd;
+    upperCmd.toUpperCase();
+    if (upperCmd.startsWith("BACKLOG")) {
+        String backlogArgs = "";
+        if (upperCmd.startsWith("BACKLOG:")) {
+            backlogArgs = cleanCmd.substring(8);
+        } else if (upperCmd.startsWith("BACKLOG ")) {
+            backlogArgs = cleanCmd.substring(8);
+        } else {
+            backlogArgs = cleanCmd.substring(7);
+        }
+        backlogArgs.trim();
+        backlogHandler(backlogArgs);
+        return;
+    }
+
+    // If string contains multiple commands separated by ';', automatically process as backlog
+    if (cleanCmd.indexOf(';') != -1) {
+        backlogHandler(cleanCmd);
+        return;
+    }
+
     String name = "";
     String arg = "";
 
-    // Parse "NAME": "ARG" or plain "NAME"
+    // Find the first delimiter: either ':' or ' '
     int colonIdx = cleanCmd.indexOf(':');
-    if (colonIdx != -1) {
-        name = cleanCmd.substring(0, colonIdx);
-        arg = cleanCmd.substring(colonIdx + 1);
+    int spaceIdx = cleanCmd.indexOf(' ');
+
+    int delimiterIdx = -1;
+    if (colonIdx != -1 && spaceIdx != -1) {
+        delimiterIdx = (colonIdx < spaceIdx) ? colonIdx : spaceIdx;
+    } else if (colonIdx != -1) {
+        delimiterIdx = colonIdx;
+    } else if (spaceIdx != -1) {
+        delimiterIdx = spaceIdx;
+    }
+
+    if (delimiterIdx != -1) {
+        name = cleanCmd.substring(0, delimiterIdx);
+        arg = cleanCmd.substring(delimiterIdx + 1);
     } else {
         name = cleanCmd;
         arg = "";
@@ -133,8 +227,15 @@ static void execute_cmd(const String &raw_cmd) {
     // Sanitize quotes and spaces
     name.trim();
     arg.trim();
+    while (arg.endsWith(";")) {
+        arg = arg.substring(0, arg.length() - 1);
+        arg.trim();
+    }
     if (name.startsWith("\"") && name.endsWith("\"")) name = name.substring(1, name.length() - 1);
     if (arg.startsWith("\"") && arg.endsWith("\""))   arg = arg.substring(1, arg.length() - 1);
+
+    // Make command name uppercase for case-insensitive lookup
+    name.toUpperCase();
 
     LOG_DEBUG("Parsed command name: '" + name + "', arg: '" + arg + "'");
 
@@ -235,7 +336,7 @@ void log_task_init(void) {
         logMutex = xSemaphoreCreateMutex();
     }
     if (commandQueue == NULL) {
-        commandQueue = xQueueCreate(10, sizeof(CommandPacket));
+        commandQueue = xQueueCreate(32, sizeof(CommandPacket));
     }
     Serial.begin(SERIAL_BAUDRATE);
 
@@ -323,16 +424,20 @@ void logPrint(const String &msg, LogLevel level) {
  * @return true if successfully registered, false if command already exists.
  */
 bool register_cmd(const String &name, CommandHandlerFunc handler) {
-    LOG_DEBUG("Register cmd " + name);
+    String cleanName = name;
+    cleanName.trim();
+    cleanName.toUpperCase();
+
+    LOG_DEBUG("Register cmd " + cleanName);
 
     // Check if command already exists
-    if (commandMap.find(name) != commandMap.end()) {
-        LOG_WARNING("Can't register cmd: " + name + ", already existed");
+    if (commandMap.find(cleanName) != commandMap.end()) {
+        LOG_WARNING("Can't register cmd: " + cleanName + ", already existed");
         return false;
     }
 
-    commandMap[name] = handler;
-    LOG_INFO("Register success cmd: " + name);
+    commandMap[cleanName] = handler;
+    LOG_INFO("Register success cmd: " + cleanName);
     return true;
 }
 
@@ -354,7 +459,9 @@ void postIncomingCommand(const String &cmdText) {
     memset(&packet, 0, sizeof(packet));
     strncpy(packet.text, cmdText.c_str(), sizeof(packet.text) - 1);
 
-    xQueueSend(commandQueue, &packet, 0);
+    if (xQueueSend(commandQueue, &packet, 0) != pdPASS) {
+        LOG_WARNING("Command queue full, dropping command: " + cmdText);
+    }
 }
 
 /**
@@ -371,6 +478,7 @@ void vLogTask(void *pvParameters) {
     register_cmd(CMD_GET_LOG_LEVEL, getLogLevel);
     register_cmd(CMD_LIST_LOG_LEVEL, listLogLevel);
     register_cmd(CMD_RESTART, esp32_restart);
+    register_cmd(CMD_BACKLOG, backlogHandler);
     register_builtin_function(BUILTIN_PRINT, built_in_print);
     LOG_INFO("vLogTask started, sleeping until command arrives...");
     for (;;) {

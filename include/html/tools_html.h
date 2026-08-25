@@ -31,9 +31,9 @@ a{text-decoration:none;}
 
 <div class='section-header'>Tools</div>
 <a href='/console'><button>Console</button></a>
-<button class='inactive'>Berry Scripting console</button>
+<a href='/tien_console'><button>Tien Script Console</button></a>
 <button class='inactive'>Extension Manager</button>
-<a href='/tools/manage_file_system'><button>Manage File system</button></a>
+<a href='manage_file_system'><button>Manage File system</button></a>
 <button class='inactive'>GPIO Viewer</button>
 <a href='/'><button>Main Menu</button></a>
 

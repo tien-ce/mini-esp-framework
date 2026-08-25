@@ -174,8 +174,7 @@ a{text-decoration:none;}
  *    Response: "OK" or JSON { "success": true }
  *
  * 4. DELETE_URL (POST):
- *    Request: POST /api/fs/delete
- *    Payload (JSON): { "path": "/filename" }
+ *    Request: POST /api/fs/delete?path=/filename
  *    Response: "OK" or JSON { "success": true }
  * -----------------------------------------------------------------------------
  */
@@ -422,12 +421,10 @@ function deleteFile(filePath) {
 
   showStatus('Deleting ' + filePath + '...', 'info', 0);
 
-  fetch(API_FS_DELETE, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify({ path: filePath })
+  const url = API_FS_DELETE + '?path=' + encodeURIComponent(filePath);
+
+  fetch(url, {
+    method: 'POST'
   })
     .then(res => {
       if (!res.ok) throw new Error('HTTP ' + res.status + ' ' + res.statusText);

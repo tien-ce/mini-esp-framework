@@ -34,8 +34,8 @@ a{text-decoration:none;}
 
 <div class='section-header'>Configuration</div>
 <a href='/config-module'><button>Module</button></a>
-<button class='inactive'>WiFi</button>
-<button class='inactive'>MQTT</button>
+<a href='/config-wifi'><button>WiFi</button></a>
+<a href='/config-mqtt'><button>MQTT</button></a>
 <button class='inactive'>Domoticz</button>
 <button class='inactive'>Timer</button>
 <button class='inactive'>KNX</button>

@@ -4,6 +4,7 @@
 #include "core/dispatcher.h"
 #include "core/log_task.h"
 #include "core/info.h"
+#include "core/wifi_task.h"
 #include "config.h"
 
 #include <WiFi.h>
@@ -149,8 +150,9 @@ void vMqttTask(void *pvParameters) {
                 if (mqttMutex != NULL && xSemaphoreTake(mqttMutex, portMAX_DELAY) == pdTRUE) {
                     mqttDoc.clear();
 
-                    mqttDoc["clientID"] = String(esp_info_get_model()) + "_" + String(esp_info_get_mac_str());
-                    mqttDoc["ip"]       = getWifiSSID();
+                    String clientID = getWifiClientID();
+                    mqttDoc["clientID"] = clientID.length() > 0 ? clientID : (String(esp_info_get_model()) + "_" + String(esp_info_get_mac_str()));
+                    mqttDoc["ip"]       = WiFi.localIP().toString();
                     mqttDoc["rssi"]     = WiFi.RSSI();
                     mqttDoc["freeHeap"] = ESP.getFreeHeap();
                     mqttDoc["uptime"]   = millis() / 1000;

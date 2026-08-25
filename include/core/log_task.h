@@ -79,12 +79,15 @@ typedef void (*CommandHandlerFunc)(const String &args);
  * @brief Command packet structure passed via FreeRTOS queue.
  */
 struct CommandPacket {
-    char text[128];
+    char text[512];
 };
 
 /* -------------------------------------------------------------------------- */
 /*                            EXTERNAL API FUNCTIONS                          */
 /* -------------------------------------------------------------------------- */
+
+/** @brief Early initialization of Serial hardware and logging mutex. */
+void log_task_init(void);
 
 /** @brief FreeRTOS task for log and command processing. */
 void vLogTask(void *pvParameters);

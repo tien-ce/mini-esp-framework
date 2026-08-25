@@ -1,6 +1,7 @@
 #include "core/web/web_template.h"
 #include "core/info.h"
 #include "core/wifi_task.h"
+#include "core/mqtt_task.h"
 #include "core/pin_config.h"
 #include "core/log_task.h"
 #include "config.h"
@@ -82,7 +83,8 @@ String web_render_template(const char* templateStr) {
     page.replace("%APP_VERSION%", String(FIRMWARE_VERSION));
     page.replace("%BUILD_DATE%", String(__DATE__) + " " + String(__TIME__));
     page.replace("%SDK_VERSION%", String(ESP.getSdkVersion()));
-    page.replace("%HOSTNAME%", "tasmota-" + String(esp_info_get_mac_str()));
+    String clientID = getWifiClientID();
+    page.replace("%HOSTNAME%", clientID.length() > 0 ? clientID : ("tasmota-" + String(esp_info_get_mac_str())));
     page.replace("%CHIP_MODEL%", String(esp_info_get_model()));
     page.replace("%MAC_ADDR%", String(esp_info_get_mac_str()));
     page.replace("%FLASH_SIZE%", String(ESP.getFlashChipSize() / 1024) + " KB");
@@ -94,6 +96,25 @@ String web_render_template(const char* templateStr) {
     page.replace("%SUBNET_MASK%", WiFi.subnetMask().toString());
     page.replace("%DNS_SERVER%", WiFi.dnsIP().toString());
     page.replace("%FREE_RAM%", String(esp_info_get_free_heap() / 1024.0, 1) + " KB");
+
+    // WiFi placeholders
+    page.replace("%WIFI_SSID%", getWifiSSID());
+    page.replace("%WIFI_PASSWORD%", getWifiPassword());
+    page.replace("%WIFI_CLIENT_ID%", getWifiClientID());
+    page.replace("%STATIC_IP%", getWifiIP());
+    page.replace("%STATIC_GATEWAY%", getWifiGateway());
+    page.replace("%STATIC_SUBNET%", getWifiSubnet());
+    page.replace("%STATIC_DNS1%", getWifiDNS1());
+
+    // MQTT placeholders
+    page.replace("%MQTT_SERVER%", getMqttServer());
+    page.replace("%MQTT_PORT%", String(getMqttPort()));
+    page.replace("%MQTT_USER%", getMqttUser());
+    page.replace("%MQTT_PASSWORD%", getMqttPass());
+    page.replace("%MQTT_TOPIC%", getMqttDataTopic());
+    page.replace("%MQTT_RPC_TOPIC%", getMqttRpcTopic());
+    page.replace("%MQTT_INTERVAL%", String(getMqttInterval()));
+
     return page;
 }
 

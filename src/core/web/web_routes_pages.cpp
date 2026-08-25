@@ -10,6 +10,8 @@
 #include "html/ota_html.h"
 #include "html/config_html.h"
 #include "html/config_module_html.h"
+#include "html/config_wifi_html.h"
+#include "html/config_mqtt_html.h"
 #include <Arduino.h>
 
 /* -------------------------------------------------------------------------- */
@@ -58,7 +60,7 @@ static void handleOta(AsyncWebServerRequest *request) {
     request->send(200, "text/html", web_render_template(OTA_HTML));
 }
 
-/** @brief Handles HTTP GET request for general WiFi configuration page ("/config"). */
+/** @brief Handles HTTP GET request for general configuration menu page ("/config"). */
 static void handleConfig(AsyncWebServerRequest *request) {
     if (!web_authenticate(request)) return;
     request->send(200, "text/html", web_render_template(CONFIG_HTML));
@@ -68,6 +70,18 @@ static void handleConfig(AsyncWebServerRequest *request) {
 static void handleConfigModule(AsyncWebServerRequest *request) {
     if (!web_authenticate(request)) return;
     request->send(200, "text/html", web_render_template(CONFIG_MODULE_HTML));
+}
+
+/** @brief Handles HTTP GET request for WiFi configuration page ("/config-wifi"). */
+static void handleConfigWifi(AsyncWebServerRequest *request) {
+    if (!web_authenticate(request)) return;
+    request->send(200, "text/html", web_render_template(CONFIG_WIFI_HTML));
+}
+
+/** @brief Handles HTTP GET request for MQTT broker configuration page ("/config-mqtt"). */
+static void handleConfigMqtt(AsyncWebServerRequest *request) {
+    if (!web_authenticate(request)) return;
+    request->send(200, "text/html", web_render_template(CONFIG_MQTT_HTML));
 }
 
 /** @brief Fallback handler for unmapped routes and HTTP 404 Not Found errors. */
@@ -92,5 +106,9 @@ void register_page_routes(AsyncWebServer *server) {
     server->on("/ota", HTTP_GET, handleOta);
     server->on("/config", HTTP_GET, handleConfig);
     server->on("/config-module", HTTP_GET, handleConfigModule);
+    server->on("/config-wifi", HTTP_GET, handleConfigWifi);
+    server->on("/wificonfig", HTTP_GET, handleConfigWifi);
+    server->on("/config-mqtt", HTTP_GET, handleConfigMqtt);
+    server->on("/mqttconfig", HTTP_GET, handleConfigMqtt);
     server->onNotFound(handleNotFound);
 }

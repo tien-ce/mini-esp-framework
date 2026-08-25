@@ -1,15 +1,15 @@
-#ifndef CONFIG_MODULE_HTML_H
-#define CONFIG_MODULE_HTML_H
+#ifndef CONFIG_MQTT_HTML_H
+#define CONFIG_MQTT_HTML_H
 
 #include <Arduino.h>
 
-const char CONFIG_MODULE_HTML[] PROGMEM = R"rawliteral(
+const char CONFIG_MQTT_HTML[] PROGMEM = R"rawliteral(
 <!DOCTYPE html>
 <html>
 <head>
 <meta charset='UTF-8'>
 <meta name='viewport' content='width=device-width, initial-scale=1'>
-<title>Configuration Module</title>
+<title>Configure MQTT</title>
 <style>
 *{margin:0;padding:0;box-sizing:border-box;}
 body{font-family:Arial,sans-serif;background:#232323;color:#ffffff;text-align:center;padding:20px 10px;}
@@ -24,11 +24,10 @@ button:hover,.btn:hover{background:#1887c9;}
 a{text-decoration:none;}
 fieldset.param-box{border:1px solid #666;border-radius:4px;padding:12px;margin-bottom:15px;background:#333333;text-align:left;}
 legend{font-size:15px;font-weight:bold;color:#ffffff;padding:0 6px;}
-.form-row{display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;}
-.form-row label{font-size:14px;font-weight:bold;color:#ffffff;width:35%;}
-.form-row label.gpio-red{color:#ff5555;}
-.form-row input[type=text], .form-row select{width:62%;padding:5px 8px;border:1px solid #777;border-radius:3px;background:#e0e0e0;color:#000000;font-size:13px;}
-hr.box-divider{border:0;border-top:1px solid #555;margin:10px 0;}
+.form-row{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;}
+.form-row label{font-size:14px;font-weight:bold;color:#ffffff;width:38%;}
+.form-row input[type=text], .form-row input[type=number], .form-row input[type=password]{width:58%;padding:6px 8px;border:1px solid #777;border-radius:3px;background:#e0e0e0;color:#000000;font-size:13px;}
+hr.box-divider{border:0;border-top:1px solid #555;margin:12px 0;}
 </style>
 </head>
 <body>
@@ -36,26 +35,46 @@ hr.box-divider{border:0;border-top:1px solid #555;margin:10px 0;}
 <h1 id='deviceHeader'>%HEADER_TITLE%</h1>
 <h2 id='deviceSubHeader'>%HEADER_SUBTITLE%</h2>
 
-<form id='moduleForm' action='/saveModule' method='POST'>
+<form id='mqttForm' action='/saveMqtt' method='POST'>
 <fieldset class='param-box'>
-<legend>Template parameters</legend>
+<legend>MQTT parameters</legend>
 
 <div class='form-row'>
-  <label for='name'>Name</label>
-  <input type='text' id='name' name='name' value='Generic'>
+  <label for='server'>Host / Server</label>
+  <input type='text' id='server' name='server' value='%MQTT_SERVER%' placeholder='192.168.1.100'>
 </div>
 
 <div class='form-row'>
-  <label for='basedOn'>Based on</label>
-  <select id='basedOn' name='basedOn'>
-    <option value='18' selected>Generic (18)</option>
-    <option value='1'>Sonoff Basic (1)</option>
-  </select>
+  <label for='port'>Port</label>
+  <input type='number' id='port' name='port' value='%MQTT_PORT%' placeholder='1883'>
+</div>
+
+<div class='form-row'>
+  <label for='user'>Client / User</label>
+  <input type='text' id='user' name='user' value='%MQTT_USER%'>
+</div>
+
+<div class='form-row'>
+  <label for='pass'>Password</label>
+  <input type='password' id='pass' name='pass' value='%MQTT_PASSWORD%'>
 </div>
 
 <hr class='box-divider'>
 
-%GPIO_TABLE_ROWS%
+<div class='form-row'>
+  <label for='topic'>Telemetry Topic</label>
+  <input type='text' id='topic' name='topic' value='%MQTT_TOPIC%' placeholder='tele/%topic%/STATE'>
+</div>
+
+<div class='form-row'>
+  <label for='rpc_topic'>RPC Topic</label>
+  <input type='text' id='rpc_topic' name='rpc_topic' value='%MQTT_RPC_TOPIC%' placeholder='cmnd/%topic%'>
+</div>
+
+<div class='form-row'>
+  <label for='interval'>Interval (s)</label>
+  <input type='number' id='interval' name='interval' value='%MQTT_INTERVAL%' placeholder='10'>
+</div>
 
 <button type='submit' class='btn-green' id='saveBtn'>Save</button>
 </fieldset>
@@ -70,7 +89,7 @@ hr.box-divider{border:0;border-top:1px solid #555;margin:10px 0;}
 </div>
 
 <script>
-document.getElementById('moduleForm').addEventListener('submit', function(e) {
+document.getElementById('mqttForm').addEventListener('submit', function(e) {
   e.preventDefault();
   var btn = document.getElementById('saveBtn');
   btn.disabled = true;
@@ -89,4 +108,4 @@ document.getElementById('moduleForm').addEventListener('submit', function(e) {
 </html>
 )rawliteral";
 
-#endif
+#endif // CONFIG_MQTT_HTML_H

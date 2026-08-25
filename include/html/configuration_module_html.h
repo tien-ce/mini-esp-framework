@@ -57,7 +57,7 @@ hr.box-divider{border:0;border-top:1px solid #555;margin:10px 0;}
 
 %GPIO_TABLE_ROWS%
 
-<button type='submit' class='btn-green'>Save</button>
+<button type='submit' class='btn-green' id='saveBtn'>Save</button>
 </fieldset>
 </form>
 
@@ -68,6 +68,23 @@ hr.box-divider{border:0;border-top:1px solid #555;margin:10px 0;}
     %FOOTER_TEXT%
 </div>
 </div>
+
+<script>
+document.getElementById('moduleForm').addEventListener('submit', function(e) {
+  e.preventDefault();
+  var btn = document.getElementById('saveBtn');
+  btn.disabled = true;
+  btn.textContent = 'Saving & Restarting...';
+  var formData = new URLSearchParams(new FormData(this));
+  fetch(this.action, { method: 'POST', body: formData })
+    .then(function() {
+      setTimeout(function() { window.location.href = '/'; }, 3000);
+    })
+    .catch(function() {
+      setTimeout(function() { window.location.href = '/'; }, 3000);
+    });
+});
+</script>
 </body>
 </html>
 )rawliteral";
