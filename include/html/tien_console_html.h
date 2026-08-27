@@ -20,12 +20,15 @@ button,.btn{display:block;width:100%;background:#1fa3ec;color:#ffffff;border:non
 button:hover,.btn:hover{background:#1887c9;}
 .btn-send{background:#28a745;margin-bottom:12px;}
 .btn-send:hover{background:#218838;}
+.btn-stop{background:#dc3545;margin-bottom:12px;}
+.btn-stop:hover{background:#c82333;}
 .btn-clear{background:#6c757d;margin-bottom:12px;}
 .btn-clear:hover{background:#5a6268;}
 .footer-text{font-size:12px;color:#aaaaaa;margin-top:20px;border-top:1px solid #555;padding-top:10px;}
 #terminal{background:#000000;color:#00e5ff;padding:14px;height:450px;overflow-y:auto;font-family:monospace;font-size:15px;line-height:1.4;border-radius:4px;text-align:left;margin-bottom:12px;border:1px solid #444;white-space:pre-wrap;}
 #terminal div{margin-bottom:3px;word-wrap:break-word;}
-textarea{width:100%;height:80px;padding:10px 12px;border:1px solid #ccc;border-radius:4px;font-size:15px;font-family:monospace;background:#ffffff;color:#000000;margin-bottom:10px;resize:vertical;}
+input[type='text'],textarea{width:100%;padding:10px 12px;border:1px solid #ccc;border-radius:4px;font-size:15px;font-family:monospace;background:#ffffff;color:#000000;margin-bottom:10px;}
+textarea{height:80px;resize:vertical;}
 a{text-decoration:none;}
 .btn-group{display:flex;gap:10px;}
 .btn-group button{flex:1;}
@@ -37,9 +40,11 @@ a{text-decoration:none;}
 <h2 id='deviceSubHeader'>Tien Script Console</h2>
 
 <div id='terminal'></div>
+<input type='text' id='scriptName' placeholder='Script / Task Name (e.g. script_1)' value='script_1'>
 <textarea id='cmdInput' placeholder='Enter Tien script expression or code... (Ctrl+Enter to execute)'></textarea>
 <div class='btn-group'>
     <button class='btn-send' onclick='sendConsoleCmd()'>Execute</button>
+    <button class='btn-stop' onclick='stopConsoleTask()'>Stop Task</button>
     <button class='btn-clear' onclick='clearTerminal()'>Clear Output</button>
 </div>
 <a href='/tools'><button>Tools Menu</button></a>
@@ -70,22 +75,38 @@ function initWS(){
   };
 }
 
-function sendCmd(cmd){
+function sendPayload(payload){
   if (wsConn && wsConn.readyState === WebSocket.OPEN) {
-      wsConn.send(cmd);
-      console.log("Sent script via WS:", cmd);
+      wsConn.send(JSON.stringify(payload));
+      console.log("Sent via WS:", payload);
   } else {
       console.error("Tien WS not open!");
   }  
 }
 
 function sendConsoleCmd(){
-  let input=document.getElementById('cmdInput');
-  let val=input.value.trim();
-  if(val.length>0){
-    sendCmd(val);
-    input.value='';
+  let nameInput=document.getElementById('scriptName');
+  let cmdInput=document.getElementById('cmdInput');
+  let name=nameInput.value.trim();
+  let val=cmdInput.value.trim();
+  if(name.length===0){
+    alert('Please enter a script/task name');
+    return;
   }
+  if(val.length>0){
+    sendPayload({action:'run', name:name, code:val});
+    cmdInput.value='';
+  }
+}
+
+function stopConsoleTask(){
+  let nameInput=document.getElementById('scriptName');
+  let name=nameInput.value.trim();
+  if(name.length===0){
+    alert('Please enter the script/task name to stop');
+    return;
+  }
+  sendPayload({action:'stop', name:name});
 }
 
 function clearTerminal(){

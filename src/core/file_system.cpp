@@ -116,13 +116,15 @@ FsResult_t read_file(const char *path, char **out_data, unsigned int *out_bytes_
     if (!path || !out_data || !out_bytes_read) return FS_ERR_INVALID_ARG;
     if (!g_fs_mounted) return FS_ERR_NOT_MOUNTED;
 
+    // `file` closes itself in its own destructor (VFSFileImpl::~VFSFileImpl),
+    // so every early return below just lets it go out of scope instead of
+    // having to remember an explicit file.close() on each branch.
     File file = LittleFS.open(path, "r", false);
     if (!file) {
         // open() doesn't say *why* it failed - only pay for exists() to disambiguate on failure.
         return LittleFS.exists(path) ? FS_ERR_OPEN_FAILED : FS_ERR_NOT_FOUND;
     }
     if (file.isDirectory()) {
-        file.close();
         return FS_ERR_IS_DIRECTORY;
     }
 
@@ -133,13 +135,11 @@ FsResult_t read_file(const char *path, char **out_data, unsigned int *out_bytes_
     char *buffer = (char*)malloc(size + 1);
     #endif
     if (!buffer) {
-        file.close();
         return FS_ERR_ALLOC_FAILED;
     }
 
     size_t readLen = file.readBytes(buffer, size);
     buffer[readLen] = '\0';
-    file.close();
 
     *out_data = buffer;
     *out_bytes_read = readLen;
@@ -152,15 +152,14 @@ FsResult_t write_file(const char *path, const char *data, unsigned int length, u
     if (!path || !data) return FS_ERR_INVALID_ARG;
     if (!g_fs_mounted) return FS_ERR_NOT_MOUNTED;
 
+    // `file` closes itself in its own destructor - no explicit close() needed on any branch.
     File file = LittleFS.open(path, "w", false);
     if (!file) return FS_ERR_OPEN_FAILED;
     if (file.isDirectory()) {
-        file.close();
         return FS_ERR_IS_DIRECTORY;
     }
 
     size_t bytesWrite = file.write((const uint8_t*)data, length);
-    file.close();
 
     if (out_bytes_written) *out_bytes_written = (unsigned int)bytesWrite;
     return (bytesWrite == length) ? FS_OK : FS_ERR_WRITE_INCOMPLETE;
@@ -172,12 +171,12 @@ FsResult_t list_file(const char *dir_path, char **out_json)
     if (!dir_path || !out_json) return FS_ERR_INVALID_ARG;
     if (!g_fs_mounted) return FS_ERR_NOT_MOUNTED;
 
+    // `root` (and each `file`) closes itself in its own destructor - no explicit close() needed.
     File root = LittleFS.open(dir_path);
     if (!root) {
         return LittleFS.exists(dir_path) ? FS_ERR_OPEN_FAILED : FS_ERR_NOT_FOUND;
     }
     if (!root.isDirectory()) {
-        root.close();
         return FS_ERR_NOT_A_DIRECTORY;
     }
 
@@ -190,7 +189,6 @@ FsResult_t list_file(const char *dir_path, char **out_json)
         }
         file = root.openNextFile();
     }
-    root.close();
 
     size_t jsonLen = measureJson(doc) + 1;
     char *jsonBuffer = (char*)malloc(jsonLen);

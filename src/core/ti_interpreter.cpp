@@ -6,6 +6,7 @@
 #include "TienInterpreter.h"
 #include <LittleFS.h>
 #include <HTTPClient.h>
+#include <algorithm>
 #include <stddef.h>
 #include <string.h>
 #include <ArduinoJson.h>
@@ -249,8 +250,27 @@ static value_t *built_in_http_post(value_t **argv, int argc) {
 }
 
 /* -------------------------------------------------------------------------- */
+/*                              STATIC VARIABLES                              */
+/* -------------------------------------------------------------------------- */
+
+static std::vector<TI_TASK_STRUCT> g_tien_tasks;
+
+typedef struct {
+    char name[32];
+    char *source_code;
+} TienTaskParam_t;
+
+/* -------------------------------------------------------------------------- */
 /*                              STATIC FUNCTIONS                              */
 /* -------------------------------------------------------------------------- */
+
+/** @brief Removes a task from the active task vector by its FreeRTOS task handle. */
+static void remove_tien_task_by_handle(TaskHandle_t handle) {
+    auto it = std::find_if(g_tien_tasks.begin(), g_tien_tasks.end(),
+        [handle](const TI_TASK_STRUCT &task) { return task.handle == handle; });
+    if (it == g_tien_tasks.end()) return;
+    g_tien_tasks.erase(it);
+}
 
 /** @brief Validates if given file path has .ti script file extension. */
 static bool has_tien_extension(const char *path) {
@@ -277,6 +297,8 @@ static void tien_log_callback(const char *fmt, va_list args) {
 static void tien_fatal_callback(void) {
     LOG_ERROR("Interpreter fatal error occurred!");
     tien_out_to_ws("[Fatal Error]: Interpreter execution halted.\n");
+    /* Remove TI_TASK_STRUCT from list */
+    remove_tien_task_by_handle(xTaskGetCurrentTaskHandle());
     vTaskDelete(NULL); 
 }
 
@@ -296,14 +318,26 @@ static void tien_run_cmd(const String &args) {
     tien_run_file(firstArg.c_str());
 }
 
+/** @brief CLI command handler for 'tien_stop <name>' command. */
+static void tien_stop_cmd(const String &args) {
+    String cleanArg = args;
+    cleanArg.trim();
+    if (cleanArg.length() == 0) return;
+    tien_stop(cleanArg.c_str());
+}
+
 /** @brief FreeRTOS task function to execute Tien script in background task. */
 static void interpreter_task(void *pvParameters) {
-    char *buffer = (char *)pvParameters;
-    if (buffer != NULL) {
-        ti_run_string(buffer);
-        UBaseType_t remainingWords = uxTaskGetStackHighWaterMark(NULL);
-        LOG_INFO("[Debug] Min Free Stack: " + String(remainingWords * sizeof(StackType_t)) + " bytes");
-        free(buffer); 
+    TienTaskParam_t *param = (TienTaskParam_t *)pvParameters;
+    if (param != NULL) {
+        if (param->source_code != NULL) {
+            ti_run_string(param->source_code);
+            UBaseType_t remainingWords = uxTaskGetStackHighWaterMark(NULL);
+            LOG_INFO("[Debug] Min Free Stack: " + String(remainingWords * sizeof(StackType_t)) + " bytes");
+            free(param->source_code);
+        }
+        remove_tien_task_by_handle(xTaskGetCurrentTaskHandle());
+        free(param);
     }
     vTaskDelete(NULL);
 }
@@ -324,20 +358,78 @@ void tien_run_file(const char *path) {
         LOG_ERROR("Read error: " + String(file_system_strerror(ret)));
         return;
     }
-    tien_run_script(buffer);
+    /* Use path like the name of script task */
+    tien_run_script(path, buffer);
     free(buffer);
 }
 
-void tien_run_script(const char *source_code) {
-    if (source_code == NULL) return;
-    char *task_payload = strdup(source_code);
-    if (task_payload == NULL) return;
-
-    BaseType_t ret = xTaskCreate(interpreter_task, "interpreter_task", 8192, (void*)task_payload, 3, NULL);
-    if (ret != pdPASS) {
-        LOG_ERROR("Failed to create interpreter task");
-        free(task_payload);
+void tien_run_script(const char *name, const char *source_code) {
+    if (name == NULL || strlen(name) == 0 || source_code == NULL) {
+        ti_log("[ERROR] Invalid script name or source code\n");
+        return;
     }
+
+    for (const auto &task : g_tien_tasks) {
+        if (strcmp(task.name, name) == 0) {
+            ti_log("[ERROR] Task '%s' already exists\n", name);
+            return;
+        }
+    }
+
+    /* Create new param to pass to task, copy name and source code to free independently */
+    TienTaskParam_t *param = (TienTaskParam_t *)malloc(sizeof(TienTaskParam_t));
+    if (param == NULL) {
+        ti_log("[ERROR] Memory allocation failed for task '%s'\n", name);
+        return;
+    }
+
+    strncpy(param->name, name, sizeof(param->name) - 1);
+    param->name[sizeof(param->name) - 1] = '\0';
+    param->source_code = strdup(source_code);
+
+    if (param->source_code == NULL) {
+        free(param);
+        ti_log("[ERROR] Memory allocation failed for task '%s'\n", name);
+        return;
+    }
+
+    TaskHandle_t task_handle = NULL;
+    BaseType_t ret = xTaskCreate(interpreter_task, name, 8192, (void*)param, 3, &task_handle);
+    if (ret != pdPASS) {
+        /* If task created failed */
+        LOG_ERROR("Failed to create interpreter task: " + String(name));
+        ti_log("[ERROR] Failed to create interpreter task '%s'\n", name);
+        free(param->source_code);
+        free(param);
+        return;
+    }
+
+    TI_TASK_STRUCT task_entry;
+    strncpy(task_entry.name, name, sizeof(task_entry.name) - 1);
+    task_entry.name[sizeof(task_entry.name) - 1] = '\0';
+    task_entry.handle = task_handle;
+    g_tien_tasks.push_back(task_entry);
+}
+
+void tien_stop(const char *name) {
+    if (name == NULL || strlen(name) == 0) return;
+
+    auto it = std::find_if(g_tien_tasks.begin(), g_tien_tasks.end(),
+        [name](const TI_TASK_STRUCT &task) { return strcmp(task.name, name) == 0; });
+
+    if (it == g_tien_tasks.end()) {
+        ti_log("[ERROR] Task '%s' not found\n", name);
+        return;
+    }
+
+    TaskHandle_t target_handle = it->handle;
+    g_tien_tasks.erase(it);
+
+    if (target_handle != NULL) {
+        vTaskDelete(target_handle);
+    }
+    ti_log("[INFO] Task '%s' stopped successfully\n", name);
+    LOG_INFO("Tien task '" + String(name) + "' stopped successfully");
 }
 
 void tien_init(void) {
@@ -355,5 +447,6 @@ void tien_init(void) {
     register_builtin_function(BUILTIN_GET_JSON_AS_BOOL, built_in_get_json_as_bool);
 
     register_cmd("tien", tien_run_cmd);
+    register_cmd("tien_stop", tien_stop_cmd);
 }
 

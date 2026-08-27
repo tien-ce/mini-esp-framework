@@ -77,7 +77,7 @@ static void send_fs_error(AsyncWebServerRequest *request, FsResult_t result) {
  *
  * Shared by /api/fs/save and /api/fs/delete, both of which receive a JSON body that may
  * arrive split across several TCP chunks. Allocates on the first chunk (index == 0) and
- * registers an idempotent onDisconnect cleanup (safe even if the caller already deleted
+ * registers an idempotent(safe if call multiple time) onDisconnect cleanup (safe even if the caller already deleted
  * the context after a normal completion, since it re-reads request->_tempObject instead
  * of a captured pointer).
  */
@@ -99,6 +99,8 @@ static UploadContext *accumulate_body_chunk(AsyncWebServerRequest *request, uint
         request->_tempObject = ctx; // Assign temp_object for next body handles of this request
         request->onDisconnect([request]() {
             UploadContext *pending = (UploadContext*)request->_tempObject;
+            // Check if the _tempObject not NULL, the previous called will set to NULL
+            // So this is called idempotent
             if (pending) {
                 delete pending;
                 request->_tempObject = nullptr;
