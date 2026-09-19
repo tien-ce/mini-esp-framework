@@ -118,10 +118,9 @@ String web_render_template(const char* templateStr) {
     return page;
 }
 
+/* This function called from drives want to update these value into the web */
 void updateElementValue(const String& key, const String& newValue) {
     telemetryDoc[key] = newValue;
-    telemetryJson = "";
-    serializeJson(telemetryDoc, telemetryJson);
 }
 
 uint8_t registerElement(const String& label, const String& unit, const String& initialValue) {
@@ -134,7 +133,10 @@ void updateElementValue(uint8_t id, const String& newValue) {
     updateElementValue(String(id), newValue);
 }
 
+/* This function is called when the client call to server to get the telemetries to show into web */
 String web_get_telemetry_json() {
+    telemetryJson = "";
+    serializeJson(telemetryDoc, telemetryJson);
     return telemetryJson;
 }
 
