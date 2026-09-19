@@ -119,8 +119,9 @@ bool Xdrv2(Signal_t signal) {
     switch (signal) {
         case SIG_INIT: {
             uint8_t used_count = 0;
-            register_builtin_function(BUILTIN_RELAY_GET_STATE, built_in_relay_get_state);
-            register_builtin_function(BUILTIN_RELAY_SET_STATE, built_in_relay_set_state);
+            static param_t relay_get_param[] = { { VAL_INT, (char*)"relay_num" } };
+            register_builtin_function(BUILTIN_RELAY_GET_STATE, VAL_INT, relay_get_param, 1, built_in_relay_get_state);
+            register_builtin_function(BUILTIN_RELAY_SET_STATE, VAL_BOOL, NULL, -1, built_in_relay_set_state);
 
             for (uint8_t i = 0; i < MAX_RELAYS; i++) {
                 String relay_name = "Relay" + String(i + 1);

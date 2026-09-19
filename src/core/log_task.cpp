@@ -56,10 +56,10 @@ static std::unordered_map<String, CommandHandlerFunc, StringHash> commandMap;
 static value_t *built_in_print(value_t **argv, int argc) {
     if (argc == 0) {
         LOG_INFO("");
-        return init_val(VAL_NULL);
+        return val_new_null();
     }
     if (argv == NULL) {
-        return init_val(VAL_NULL);
+        return val_new_null();
     }
     String buffer = "";
     for (int i = 0; i < argc; i++) {
@@ -90,7 +90,7 @@ static value_t *built_in_print(value_t **argv, int argc) {
         }
     }
     LOG_INFO(buffer);
-    return init_val(VAL_NULL);
+    return val_new_null();
 }
 
 /** @brief Command handler: Restarts system. */
@@ -479,7 +479,7 @@ void vLogTask(void *pvParameters) {
     register_cmd(CMD_LIST_LOG_LEVEL, listLogLevel);
     register_cmd(CMD_RESTART, esp32_restart);
     register_cmd(CMD_BACKLOG, backlogHandler);
-    register_builtin_function(BUILTIN_PRINT, built_in_print);
+    register_builtin_function(BUILTIN_PRINT, VAL_VOID, NULL, -1, built_in_print);
     LOG_INFO("vLogTask started, sleeping until command arrives...");
     for (;;) {
 #if !(defined(ARDUINO_USB_CDC_ON_BOOT) && (ARDUINO_USB_CDC_ON_BOOT > 0))

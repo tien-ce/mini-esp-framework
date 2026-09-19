@@ -167,7 +167,7 @@ static value_t *built_in_delay(value_t **argv, int argc) {
             ti_fatal();
             break;
     }
-    return init_val(VAL_NULL);
+    return val_new_null();
 }
 
 /** @brief Built-in http_get function executing HTTP GET and returning JSON string with code and payload. */
@@ -436,15 +436,19 @@ void tien_init(void) {
     ti_register_log(tien_log_callback);
     ti_register_fatal(tien_fatal_callback);
 
-    register_builtin_function(BUILTIN_IS_NONE, built_in_is_none);
-    register_builtin_function(BUILTIN_DELAY, built_in_delay);
-    register_builtin_function(BUILTIN_HTTP_GET, built_in_http_get);
-    register_builtin_function(BUILTIN_HTTP_POST, built_in_http_post);
-    register_builtin_function(BUILTIN_GET_JSON, built_in_get_json);
-    register_builtin_function(BUILTIN_GET_JSON_AS_STRING, built_in_get_json_as_string);
-    register_builtin_function(BUILTIN_GET_JSON_AS_INT, built_in_get_json_as_int);
-    register_builtin_function(BUILTIN_GET_JSON_AS_FLOAT, built_in_get_json_as_float);
-    register_builtin_function(BUILTIN_GET_JSON_AS_BOOL, built_in_get_json_as_bool);
+    static param_t delay_params[] = { { VAL_INT, (char*)"ms" } };
+    static param_t http_get_params[] = { { VAL_STRING, (char*)"url" } };
+    static param_t json_params[] = { { VAL_STRING, (char*)"json" }, { VAL_STRING, (char*)"key" } };
+
+    register_builtin_function(BUILTIN_IS_NONE, VAL_BOOL, NULL, -1, built_in_is_none);
+    register_builtin_function(BUILTIN_DELAY, VAL_VOID, delay_params, 1, built_in_delay);
+    register_builtin_function(BUILTIN_HTTP_GET, VAL_STRING, http_get_params, 1, built_in_http_get);
+    register_builtin_function(BUILTIN_HTTP_POST, VAL_STRING, NULL, -1, built_in_http_post);
+    register_builtin_function(BUILTIN_GET_JSON, VAL_STRING, json_params, 2, built_in_get_json);
+    register_builtin_function(BUILTIN_GET_JSON_AS_STRING, VAL_STRING, json_params, 2, built_in_get_json_as_string);
+    register_builtin_function(BUILTIN_GET_JSON_AS_INT, VAL_INT, json_params, 2, built_in_get_json_as_int);
+    register_builtin_function(BUILTIN_GET_JSON_AS_FLOAT, VAL_FLOAT, json_params, 2, built_in_get_json_as_float);
+    register_builtin_function(BUILTIN_GET_JSON_AS_BOOL, VAL_BOOL, json_params, 2, built_in_get_json_as_bool);
 
     register_cmd("tien", tien_run_cmd);
     register_cmd("tien_stop", tien_stop_cmd);

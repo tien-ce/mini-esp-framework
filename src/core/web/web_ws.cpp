@@ -4,6 +4,8 @@
 #include "core/ti_interpreter.h"
 #include "config.h"
 #include <ArduinoJson.h>
+#include <esp_heap_caps.h>
+#include <new>
 
 /* -------------------------------------------------------------------------- */
 /*                              STRUCTURES & TYPES                            */
@@ -91,18 +93,17 @@ static void onWsEvent(AsyncWebSocket *server, AsyncWebSocketClient *client, AwsE
 }
 
 /** @brief WebSocket event handler for "/ws_tien" Tien script console endpoint. */
-static void onWsTienEvent(AsyncWebSocket *server, AsyncWebSocketClient *client, AwsEventType type,
-                          void *arg, uint8_t *data, size_t len) {
+static void onWsTienEvent(AsyncWebSocket *server, AsyncWebSocketClient *client, AwsEventType type,void *arg, uint8_t *data, size_t len) {
     // Logic: Handle client connection event and send greeting
     if (type == WS_EVT_CONNECT) {
-        Serial.printf("Tien WebSocket client #%u connected\n", client->id());
+        LOG_DEBUG_STR("[ws_tien] client #%u connected", client->id());
         client->text("=== Tien Script Interpreter Console Connected ===");
         return;
     } 
 
     // Logic: Handle client disconnect event and clean up any pending chunked buffer
     if (type == WS_EVT_DISCONNECT) {
-        Serial.printf("Tien WebSocket client #%u disconnected\n", client->id());
+        LOG_DEBUG_STR("[ws_tien] client #%u disconnected", client->id());
         // If an in-flight chunked upload was interrupted by disconnect, free accumulated buffer
         if (client->_tempObject != NULL) {
             delete (WsTienUploadContext_t*)client->_tempObject;
@@ -127,27 +128,52 @@ static void onWsTienEvent(AsyncWebSocket *server, AsyncWebSocketClient *client, 
     if (info->index == 0) {
         // If a leftover context exists from a previous uncompleted payload, free it first
         if (ctx != NULL) {
+            LOG_WARNING("[ws_tien] Freeing leftover context from previous incomplete payload");
             delete ctx;
             client->_tempObject = NULL;
         }
 
-        ctx = new WsTienUploadContext_t();
+        // --- Diagnostic: Log heap state BEFORE allocation ---
+        LOG_DEBUG_STR("[ws_tien] Alloc request: info->len=%u, chunk len=%u, final=%d",
+                      (unsigned)info->len, (unsigned)len, (int)info->final);
+        LOG_DEBUG_STR("[ws_tien] Heap before alloc: internal free=%u, largest_block=%u, PSRAM free=%u, PSRAM largest=%u",
+                      (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
+                      (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL),
+                      (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM),
+                      (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM));
+
+        ctx = new (std::nothrow) WsTienUploadContext_t();
+        if (ctx == NULL) {
+            LOG_ERROR("[ws_tien] Failed to allocate WsTienUploadContext_t struct (new returned NULL)");
+            client->text("[Error]: Memory allocation failed for incoming script payload");
+            return;
+        }
         ctx->total_size = info->len;
 
-        // Allocate buffer in PSRAM when available to conserve internal SRAM for scripts
+        // Allocate buffer: try PSRAM first, fallback to internal heap
         #ifdef SYSTEM_USES_PSRAM
         ctx->buffer = (char*)ps_malloc(info->len + 1);
+        if (ctx->buffer == NULL) {
+            LOG_WARNING_STR("[ws_tien] ps_malloc(%u) failed, falling back to malloc", (unsigned)(info->len + 1));
+            ctx->buffer = (char*)malloc(info->len + 1);
+        }
         #else
         ctx->buffer = (char*)malloc(info->len + 1);
         #endif
 
         // Check if payload buffer allocation in PSRAM/Heap failed
         if (ctx->buffer == NULL) {
+            LOG_ERROR_STR("[ws_tien] Buffer alloc FAILED for %u bytes. Internal free=%u, largest=%u, PSRAM free=%u",
+                          (unsigned)(info->len + 1),
+                          (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
+                          (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL),
+                          (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
             delete ctx;
             client->_tempObject = NULL;
             client->text("[Error]: Memory allocation failed for incoming script payload");
             return;
         }
+        LOG_DEBUG_STR("[ws_tien] Buffer allocated OK: %u bytes at %p", (unsigned)(info->len + 1), ctx->buffer);
         client->_tempObject = ctx;
     }
 
@@ -162,11 +188,14 @@ static void onWsTienEvent(AsyncWebSocket *server, AsyncWebSocketClient *client, 
 
     // Logic: Return early if not all chunks have been collected yet
     if (!info->final || (info->index + len != info->len)) {
+        LOG_DEBUG_STR("[ws_tien] Chunk received: offset=%u, chunk=%u, total=%u (waiting for more)",
+                      (unsigned)info->index, (unsigned)len, (unsigned)info->len);
         return;
     }
 
     // Null-terminate the full payload string
     ctx->buffer[info->len] = '\0';
+    LOG_DEBUG_STR("[ws_tien] Payload complete: %u bytes received", (unsigned)ctx->received_size);
 
     // Parse collected JSON payload
     #ifdef SYSTEM_USES_PSRAM

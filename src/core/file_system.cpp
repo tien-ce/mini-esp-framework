@@ -87,10 +87,14 @@ const char *file_system_strerror(FsResult_t result)
 bool file_system_init(bool formatonfail, const char *basepath, uint8_t maxopenfiles)
 {
     g_fs_mounted = LittleFS.begin(formatonfail, basepath, maxopenfiles);
-    register_builtin_function(BUILTIN_FILE_READ, built_in_file_read);
-    register_builtin_function(BUILTIN_FILE_WRITE, built_in_file_write);
-    register_builtin_function(BUILTIN_FILE_EXISTS, built_in_file_exists);
-    register_builtin_function(BUILTIN_FILE_REMOVE, built_in_file_remove);
+
+    static param_t fs_path_param[] = { { VAL_STRING, (char*)"path" } };
+    static param_t fs_write_params[] = { { VAL_STRING, (char*)"path" }, { VAL_STRING, (char*)"data" } };
+
+    register_builtin_function(BUILTIN_FILE_READ, VAL_STRING, fs_path_param, 1, built_in_file_read);
+    register_builtin_function(BUILTIN_FILE_WRITE, VAL_BOOL, fs_write_params, 2, built_in_file_write);
+    register_builtin_function(BUILTIN_FILE_EXISTS, VAL_BOOL, fs_path_param, 1, built_in_file_exists);
+    register_builtin_function(BUILTIN_FILE_REMOVE, VAL_BOOL, fs_path_param, 1, built_in_file_remove);
     return g_fs_mounted;
 }
 

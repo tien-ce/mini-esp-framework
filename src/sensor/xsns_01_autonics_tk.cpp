@@ -151,9 +151,10 @@ static void ProcessModbusPoll() {
 bool Xsns1(Signal_t signal) {
     switch (signal) {
         case SIG_INIT: {
-            register_builtin_function(BUILTIN_AUTONICS_TK_SET_SLAVE_ADDRESS, built_in_autonics_tk_set_slave_address);
-            register_builtin_function(BUILTIN_AUTONICS_TK_GET_PV, built_in_autonics_tk_get_pv);
-            register_builtin_function(BUILTIN_AUTONICS_TK_GET_SV, built_in_autonics_tk_get_sv);
+            static param_t tk_addr_param[] = { { VAL_INT, (char*)"slave_address" } };
+            register_builtin_function(BUILTIN_AUTONICS_TK_SET_SLAVE_ADDRESS, VAL_BOOL, tk_addr_param, 1, built_in_autonics_tk_set_slave_address);
+            register_builtin_function(BUILTIN_AUTONICS_TK_GET_PV, VAL_FLOAT, NULL, 0, built_in_autonics_tk_get_pv);
+            register_builtin_function(BUILTIN_AUTONICS_TK_GET_SV, VAL_FLOAT, NULL, 0, built_in_autonics_tk_get_sv);
 
             if (!CheckRS485PinConfig()) {
                 return false;

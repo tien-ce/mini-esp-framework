@@ -1,3 +1,4 @@
+#include "config.h"
 #include "core/web/web_routes_fs.h"
 #include "core/web/web_auth.h"
 #include "core/log_task.h"
