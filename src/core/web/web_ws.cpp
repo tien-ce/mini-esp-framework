@@ -217,12 +217,12 @@ static void onWsTienEvent(AsyncWebSocket *server, AsyncWebSocketClient *client, 
             tien_stop(name);
         } else {
             const char *code = doc["code"] | "";
-            web_ws_tien_send("> [" + String(name) + "]\n" + String(code));
+            web_ws_tien_send("> [Run task: " + String(name) + "]");
             tien_run_script(name, code);
         }
     } else {
         // Logic: Fallback for raw text script input if not JSON formatted
-        web_ws_tien_send("> " + String(ctx->buffer));
+        web_ws_tien_send("> [Run console script]");
         tien_run_script("console", ctx->buffer);
     }
 
