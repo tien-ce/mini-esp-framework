@@ -8,6 +8,8 @@
 
 #define NUM_DRIVERS 10
 #define NUM_SENSORS 10
+#define NUM_ADAPTERS 10
+
 // Macro to declare a single weak Xdrv function returning false
 #define DEFINE_WEAK_XDRV(num) \
     __attribute__((weak)) bool Xdrv##num(Signal_t func) { return false; }
@@ -15,6 +17,10 @@
 // Macro to declare all weak Xsns functions from 1 to NUM_SENSORS
 #define DEFINE_WEAK_XSNS(num) \
     __attribute__((weak)) bool Xsns##num(Signal_t func) { return false; }
+
+// Macro to declare all weak Xadp functions from 1 to NUM_ADAPTERS
+#define DEFINE_WEAK_XADP(num) \
+    __attribute__((weak)) bool Xadp##num(Signal_t func) { return false; }
 
 typedef enum {
     SIG_INIT = 0,

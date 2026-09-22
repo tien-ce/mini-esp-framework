@@ -30,6 +30,18 @@ DEFINE_WEAK_XSNS(8)
 DEFINE_WEAK_XSNS(9)
 DEFINE_WEAK_XSNS(10)
 
+/* Define weak Xadp functions */
+DEFINE_WEAK_XADP(1)
+DEFINE_WEAK_XADP(2)
+DEFINE_WEAK_XADP(3)
+DEFINE_WEAK_XADP(4)
+DEFINE_WEAK_XADP(5)
+DEFINE_WEAK_XADP(6)
+DEFINE_WEAK_XADP(7)
+DEFINE_WEAK_XADP(8)
+DEFINE_WEAK_XADP(9)
+DEFINE_WEAK_XADP(10)
+
 typedef bool (*XdrvFunc_t)(Signal_t);
 
 /* ----------------------- Static Variables ------------------------------*/
@@ -41,6 +53,11 @@ static XdrvFunc_t s_xdrv_table[NUM_DRIVERS] = {
 static XdrvFunc_t s_xsns_table[NUM_SENSORS] = {
     Xsns1, Xsns2, Xsns3, Xsns4, Xsns5,
     Xsns6, Xsns7, Xsns8, Xsns9, Xsns10
+};
+
+static XdrvFunc_t s_xadp_table[NUM_ADAPTERS] = {
+    Xadp1, Xadp2, Xadp3, Xadp4, Xadp5,
+    Xadp6, Xadp7, Xadp8, Xadp9, Xadp10
 };
 
 static TaskHandle_t s_dispatcher_task_handle = NULL;
@@ -91,6 +108,11 @@ static void execute_dispatch(Signal_t signal) {
             s_xsns_table[i](signal);
         }
     }
+    for (uint8_t i = 0; i < NUM_ADAPTERS; i++) {
+        if (s_xadp_table[i] != NULL) {
+            s_xadp_table[i](signal);
+        }
+    }
 }
 
 /**
@@ -116,6 +138,15 @@ static void vDispatcherTask(void *pvParameters) {
             bool is_initialized = s_xsns_table[i](SIG_INIT);
             if (!is_initialized)
                 s_xsns_table[i] = NULL;
+        }
+    }
+
+    for (uint8_t i = 0; i < NUM_ADAPTERS; i++) {       
+        if (s_xadp_table[i] != NULL) {
+            // Check adapter is set to run or not
+            bool is_initialized = s_xadp_table[i](SIG_INIT);
+            if (!is_initialized)
+                s_xadp_table[i] = NULL;
         }
     }
     for (;;) {

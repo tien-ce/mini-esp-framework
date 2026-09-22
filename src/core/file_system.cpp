@@ -10,61 +10,6 @@
 // its own generic "not mounted" error deep inside open()/exists().
 static bool g_fs_mounted = false;
 
-/* -------------------------------------------------------------------------- */
-/*                        INTERPRETER BUILT-IN FUNCTIONS                      */
-/* -------------------------------------------------------------------------- */
-
-/** @brief Built-in file_read function to read entire text file from LittleFS into a string. */
-static value_t *built_in_file_read(value_t **argv, int argc) {
-    if (argc != 1 || argv == NULL || argv[0] == NULL || argv[0]->type != VAL_STRING || argv[0]->string_val == NULL) {
-        ti_log("[ERROR] %s: Expect 1 string argument (file path)\n", BUILTIN_FILE_READ);
-        ti_fatal();
-    }
-    char *buffer = NULL;
-    size_t read_bytes = 0;
-    FsResult_t ret = read_file(argv[0]->string_val, &buffer, &read_bytes);
-    if (ret != FS_OK || buffer == NULL) {
-        return val_new_null();
-    }
-    value_t *result = val_new_string(buffer);
-    free(buffer);
-    return result;
-}
-
-/** @brief Built-in file_write function to overwrite content to a LittleFS file. */
-static value_t *built_in_file_write(value_t **argv, int argc) {
-    if (argc != 2 || argv == NULL || argv[0] == NULL || argv[1] == NULL ||
-        argv[0]->type != VAL_STRING || argv[1]->type != VAL_STRING ||
-        argv[0]->string_val == NULL || argv[1]->string_val == NULL) {
-        ti_log("[ERROR] %s: Expect 2 string arguments (file path, content)\n", BUILTIN_FILE_WRITE);
-        ti_fatal();
-    }
-    const char *path = argv[0]->string_val;
-    const char *data = argv[1]->string_val;
-    unsigned int written = 0;
-    FsResult_t ret = write_file(path, data, (unsigned int)strlen(data), &written);
-    return val_new_bool(ret == FS_OK);
-}
-
-/** @brief Built-in file_exists function to check if a file exists on LittleFS. */
-static value_t *built_in_file_exists(value_t **argv, int argc) {
-    if (argc != 1 || argv == NULL || argv[0] == NULL || argv[0]->type != VAL_STRING || argv[0]->string_val == NULL) {
-        ti_log("[ERROR] %s: Expect 1 string argument (file path)\n", BUILTIN_FILE_EXISTS);
-        ti_fatal();
-    }
-    bool exists = LittleFS.exists(argv[0]->string_val);
-    return val_new_bool(exists);
-}
-
-/** @brief Built-in file_remove function to delete a file from LittleFS. */
-static value_t *built_in_file_remove(value_t **argv, int argc) {
-    if (argc != 1 || argv == NULL || argv[0] == NULL || argv[0]->type != VAL_STRING || argv[0]->string_val == NULL) {
-        ti_log("[ERROR] %s: Expect 1 string argument (file path)\n", BUILTIN_FILE_REMOVE);
-        ti_fatal();
-    }
-    FsResult_t ret = remove_file(argv[0]->string_val);
-    return val_new_bool(ret == FS_OK);
-}
 
 const char *file_system_strerror(FsResult_t result)
 {
@@ -87,14 +32,6 @@ const char *file_system_strerror(FsResult_t result)
 bool file_system_init(bool formatonfail, const char *basepath, uint8_t maxopenfiles)
 {
     g_fs_mounted = LittleFS.begin(formatonfail, basepath, maxopenfiles);
-
-    static param_t fs_path_param[] = { { VAL_STRING, (char*)"path" } };
-    static param_t fs_write_params[] = { { VAL_STRING, (char*)"path" }, { VAL_STRING, (char*)"data" } };
-
-    register_builtin_function(BUILTIN_FILE_READ, VAL_STRING, fs_path_param, 1, built_in_file_read);
-    register_builtin_function(BUILTIN_FILE_WRITE, VAL_BOOL, fs_write_params, 2, built_in_file_write);
-    register_builtin_function(BUILTIN_FILE_EXISTS, VAL_BOOL, fs_path_param, 1, built_in_file_exists);
-    register_builtin_function(BUILTIN_FILE_REMOVE, VAL_BOOL, fs_path_param, 1, built_in_file_remove);
     return g_fs_mounted;
 }
 
@@ -113,6 +50,21 @@ size_t file_system_get_used()
 }
 
 /* file and directory interaction */
+
+/*
+ * Luồng thực thi của read_file():
+ * 1. Khởi tạo giá trị mặc định cho các out-pointer (*out_data = NULL, *out_bytes_read = 0).
+ * 2. Kiểm tra tính hợp lệ của con trỏ đầu vào (fail-fast với FS_ERR_INVALID_ARG).
+ * 3. Kiểm tra trạng thái mount của LittleFS (FS_ERR_NOT_MOUNTED).
+ * 4. Mở file theo cơ chế RAII: LittleFS File tự động đóng tài nguyên khi ra khỏi phạm vi (destructor).
+ * 5. Phân loại mã lỗi khi mở file thất bại (FS_ERR_NOT_FOUND nếu không tồn tại, FS_ERR_OPEN_FAILED nếu lỗi hệ thống).
+ * 6. Kiểm tra an toàn: từ chối nếu đường dẫn trỏ tới một thư mục (FS_ERR_IS_DIRECTORY).
+ * 7. Cấp phát bộ nhớ động (ưu tiên PSRAM nếu có macro SYSTEM_USES_PSRAM, ngược lại dùng Internal Heap qua malloc).
+ *    Kích thước cấp phát: size + 1 byte để đảm bảo chứa ký tự kết thúc chuỗi '\0'.
+ * 8. Đọc dữ liệu từ flash vào buffer, gán ký tự null-terminator.
+ * 9. Chuyển giao quyền sở hữu vùng nhớ (Ownership Transfer): Gán con trỏ buffer sang *out_data.
+ *    LƯU Ý: Caller có toàn quyền và chịu trách nhiệm gọi free(*out_data) sau khi sử dụng để tránh memory leak.
+ */
 FsResult_t read_file(const char *path, char **out_data, unsigned int *out_bytes_read)
 {
     if (out_data) *out_data = NULL;
@@ -133,6 +85,8 @@ FsResult_t read_file(const char *path, char **out_data, unsigned int *out_bytes_
     }
 
     size_t size = file.size();
+    // Cấp phát vùng nhớ đệm động (Dynamic Buffer Allocation):
+    // Caller kế thừa quyền sở hữu vùng nhớ này và bắt buộc phải giải phóng bằng free().
     #ifdef SYSTEM_USES_PSRAM
     char *buffer = (char*) ps_malloc(size + 1);
     #else
@@ -145,6 +99,7 @@ FsResult_t read_file(const char *path, char **out_data, unsigned int *out_bytes_
     size_t readLen = file.readBytes(buffer, size);
     buffer[readLen] = '\0';
 
+    // Chuyển giao quyền sở hữu bộ nhớ cho caller
     *out_data = buffer;
     *out_bytes_read = readLen;
     return FS_OK;
@@ -169,6 +124,17 @@ FsResult_t write_file(const char *path, const char *data, unsigned int length, u
     return (bytesWrite == length) ? FS_OK : FS_ERR_WRITE_INCOMPLETE;
 }
 
+/*
+ * Luồng thực thi của list_file():
+ * 1. Khởi tạo *out_json = NULL; kiểm tra tham số đầu vào và trạng thái mount của LittleFS.
+ * 2. Mở thư mục dir_path theo cơ chế RAII; xác thực đây là một thư mục hợp lệ (!root.isDirectory() -> FS_ERR_NOT_A_DIRECTORY).
+ * 3. Duyệt tuần tự các entry con thông qua root.openNextFile(), bỏ qua các thư mục con và thu thập cặp key-value
+ *    (file.name(): file.size()) vào cấu trúc JsonDocument của ArduinoJson.
+ * 4. Đo đạc kích thước chuỗi JSON chính xác qua measureJson(doc) + 1 byte cho ký tự '\0'.
+ * 5. Cấp phát vùng nhớ động trên Heap thông qua malloc() cho chuỗi kết quả.
+ * 6. Serialize nội dung JSON vào jsonBuffer và chuyển giao quyền sở hữu vùng nhớ cho caller (*out_json = jsonBuffer).
+ *    LƯU Ý: Caller chịu trách nhiệm gọi free(*out_json) sau khi hoàn tất sử dụng.
+ */
 FsResult_t list_file(const char *dir_path, char **out_json)
 {
     if (out_json) *out_json = NULL;
@@ -184,6 +150,7 @@ FsResult_t list_file(const char *dir_path, char **out_json)
         return FS_ERR_NOT_A_DIRECTORY;
     }
 
+    // Thu thập danh sách tập tin và kích thước vào JsonDocument
     JsonDocument doc;
     JsonObject obj = doc.to<JsonObject>();
     File file = root.openNextFile();
@@ -194,12 +161,15 @@ FsResult_t list_file(const char *dir_path, char **out_json)
         file = root.openNextFile();
     }
 
+    // Đo đạc kích thước và cấp phát động chuỗi JSON trên Heap
     size_t jsonLen = measureJson(doc) + 1;
     char *jsonBuffer = (char*)malloc(jsonLen);
     if (!jsonBuffer) {
         return FS_ERR_ALLOC_FAILED;
     }
     serializeJson(doc, jsonBuffer, jsonLen);
+
+    // Chuyển giao quyền sở hữu con trỏ bộ nhớ cho caller (caller phải gọi free())
     *out_json = jsonBuffer;
     return FS_OK;
 }

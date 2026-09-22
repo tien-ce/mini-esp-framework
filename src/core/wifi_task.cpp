@@ -124,7 +124,14 @@ static void WiFiStationDisconnected(WiFiEvent_t event, WiFiEventInfo_t info) {
 }
 
 /**
- * @brief Configures WiFi hardware mode, static IP, events, and initiates connection.
+ * @brief Cấu hình phần cứng WiFi (chế độ Station), thiết lập IP tĩnh, đăng ký sự kiện và bắt đầu kết nối AP.
+ * 
+ * @details Quy trình bao gồm:
+ *          1. Chuyển trạng thái sang NET_STATE_CONNECTING, cấu hình chế độ WIFI_STA và gán Hostname/Client ID.
+ *          2. Áp dụng cấu hình IP tĩnh (nếu bật cờ USE_STATIC_IP).
+ *          3. Đăng ký callback WiFiStationDisconnected để nhận diện sự kiện ngắt kết nối.
+ *          4. Kích hoạt kết nối WiFi.begin() và áp dụng cơ chế Timeout Polling 20 giây để chờ đồng bộ.
+ *          5. Khi kết nối thành công, kích hoạt chẩn đoán ICMP Ping tới Gateway để kiểm tra tính thông suốt mạng.
  */
 static void setup_wifi() {
     /* Update state of network is connecting */
@@ -163,6 +170,13 @@ static void setup_wifi() {
     WiFi.begin(currentSsid.c_str(), currentPass.c_str());
     LOG_INFO("Connecting to WiFi: " + currentSsid);
 
+    /*
+     * CƠ CHẾ TIMEOUT POLLING 20 GIÂY (Bounded Polling Timeout Mechanism):
+     * Vòng lặp thăm dò trạng thái kết nối định kỳ mỗi 500ms với biến đếm tối đa 40 lần thử (attempts < 40).
+     * Tổng thời gian timeout tối đa: 40 * 500ms = 20,000ms = 20 giây.
+     * Cơ chế này ngăn chặn tình trạng treo tác vụ (task blocking) vô hạn nếu Access Point (AP) không phản hồi,
+     * suy hao tín hiệu nghiêm trọng hoặc sai thông tin xác thực mật khẩu.
+     */
     int attempts = 0;
     while (WiFi.status() != WL_CONNECTED && attempts < 40) {
         vTaskDelay(pdMS_TO_TICKS(500));
@@ -178,7 +192,13 @@ static void setup_wifi() {
         LOG_INFO("Gateway: " + WiFi.gatewayIP().toString());
         LOG_INFO("Signal Strength (RSSI): " + String(WiFi.RSSI()) + " dBm");
 
-        // Run Ping Diagnostic against Gateway
+        /*
+         * CƠ CHẾ CHẨN ĐOÁN MẠNG ICMP PING (Network Diagnostics via ICMP Echo Ping):
+         * Sau khi stack IP sẵn sàng, hệ thống chủ động gửi 3 gói tin ICMP Echo Request tới địa chỉ Gateway IP.
+         * Mục đích:
+         * 1. Xác thực tính thông suốt của đường truyền mạng nội bộ (Layer 3 connectivity).
+         * 2. Phát hiện sớm các lỗi cấu hình như AP Isolation trên Router, sai Subnet/Gateway, hoặc xung đột IP.
+         */
         IPAddress targetServer;
         targetServer.fromString(getWifiGateway());
         diagnose_connection_issues(targetServer);
@@ -482,6 +502,10 @@ int get_wifi_rssi() {
     return WiFi.RSSI();
 }
 
+/**
+ * @brief FreeRTOS task quản lý cấu hình WiFi và điều phối máy trạng thái tự động kết nối lại (Auto-Reconnect).
+ * @param[in] pvParameters Tham số tác vụ FreeRTOS (không sử dụng).
+ */
 void vWifiTask(void *pvParameters) {
     /* Wait until log initialized */
     waiting_on_event(SYSTEM_EVENT, SYS_NORMAL, portMAX_DELAY);
@@ -509,6 +533,22 @@ void vWifiTask(void *pvParameters) {
 
     setup_wifi();
     for (;;) {
+        /*
+         * MÁY TRẠNG THÁI TỰ ĐỘNG KẾT NỐI LẠI NON-BLOCKING 30 GIÂY (Non-blocking Reconnect State Machine):
+         * 1. Chu kỳ thăm dò (Polling Interval): Task thức dậy mỗi 5000ms (5 giây) để kiểm tra is_wifi_connected().
+         * 2. Nhận diện mất kết nối: Nếu mất kết nối, lập tức cập nhật trạng thái mạng sang NET_STATE_DISCONNECTED.
+         * 3. Cơ chế Non-blocking Timer:
+         *    Sử dụng hiệu số (currentMillis - previousWifiMillis >= wifiReconnectInterval) với wifiReconnectInterval = 30000ms (30s).
+         *    - Tránh việc block task bằng vTaskDelay(30000), đảm bảo FreeRTOS scheduler vẫn có thể phân phối thời gian CPU
+         *      cho các tiến trình khác và cho phép task phản ứng nhanh nếu trạng thái mạng thay đổi từ bên ngoài.
+         * 4. Các bước chuyển trạng thái (State Transitions):
+         *    - [State: DISCONNECTED] -> [State: CONNECTING]: Phát tín hiệu SIG_WIFI_DISCONNECTED để các subsystem (như MQTT)
+         *      tạm dừng truyền thông hoặc đóng socket an toàn.
+         *    - Thực hiện ngắt phiên cũ (WiFi.disconnect()) và yêu cầu kết nối lại (WiFi.begin()).
+         *    - Chờ 500ms để stack mạng cập nhật trạng thái handshake ban đầu.
+         *    - Nếu thành công: Chuyển sang [State: WIFI_STA] và ghi log.
+         *    - Nếu thất bại: Giữ nguyên trạng thái ngắt kết nối, cập nhật previousWifiMillis để bắt đầu chu kỳ 30s kế tiếp.
+         */
         if (!is_wifi_connected()) {
             unsigned long currentMillis = millis();
             CoreState_SetNetwork(NET_STATE_DISCONNECTED);

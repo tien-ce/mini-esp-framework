@@ -44,7 +44,15 @@ wl_status_t get_wifi_link_status();
 /** @brief Gets WiFi RSSI signal strength. */
 int get_wifi_rssi();
 
-/** @brief FreeRTOS task for WiFi monitoring and auto-reconnection. */
+/**
+ * @brief FreeRTOS task quản lý cấu hình mạng WiFi và máy trạng thái tự động kết nối lại non-blocking.
+ * 
+ * @details Task khởi tạo kết nối WiFi ban đầu (chế độ STA, static IP nếu bật), đăng ký các lệnh CLI,
+ *          và chạy vòng lặp giám sát định kỳ. Khi phát hiện mất kết nối, task kích hoạt máy trạng thái
+ *          kết nối lại tự động với chu kỳ non-blocking 30 giây mà không làm treo các tiến trình hệ thống khác.
+ * 
+ * @param[in] pvParameters Con trỏ tham số truyền vào từ FreeRTOS xTaskCreate (không sử dụng, có thể là NULL).
+ */
 void vWifiTask(void *pvParameters);
 
 #endif // WIFI_TASK_H

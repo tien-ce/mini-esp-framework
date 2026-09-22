@@ -116,7 +116,7 @@ static value_t *autonic_read(value_t **argv, int argc) {
     return val_new_string(json_buf);
 }
 
-bool Xsns1(Signal_t signal) {
+bool Xadp1(Signal_t signal) {
     switch (signal) {
         case SIG_INIT: {
             if (!CheckRS485PinConfig()) {

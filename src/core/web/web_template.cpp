@@ -123,16 +123,6 @@ void updateElementValue(const String& key, const String& newValue) {
     telemetryDoc[key] = newValue;
 }
 
-uint8_t registerElement(const String& label, const String& unit, const String& initialValue) {
-    updateElementValue(label, initialValue);
-    LOG_DEBUG("tableRowsHTML: " + tableRowsHTML);
-    return 0;
-}
-
-void updateElementValue(uint8_t id, const String& newValue) {
-    updateElementValue(String(id), newValue);
-}
-
 /* This function is called when the client call to server to get the telemetries to show into web */
 String web_get_telemetry_json() {
     telemetryJson = "";

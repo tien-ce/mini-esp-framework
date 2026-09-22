@@ -131,6 +131,10 @@ void updateMqttConfig(const String &server, uint16_t port, const String &user,
 }
 
 
+/**
+ * @brief FreeRTOS task quản lý vòng đời kết nối MQTT Broker và chu kỳ xuất bản dữ liệu Telemetry.
+ * @param[in] pvParameters Tham số tác vụ FreeRTOS (không sử dụng).
+ */
 void vMqttTask(void *pvParameters) {
     waiting_on_event(NETWORK_EVENT, NET_STATE_WIFI_STA, portMAX_DELAY);
     
@@ -147,6 +151,11 @@ void vMqttTask(void *pvParameters) {
             mqttClient.loop();
 
             if (mqttClient.connected()) {
+                /*
+                 * GIAI ĐOẠN 1: Nạp metadata hệ thống vào đối tượng JSON (Vùng găng 1)
+                 * Lấy mqttMutex để đảm bảo an toàn truy cập vào tài nguyên dùng chung mqttDoc.
+                 * Ghi nhận thông tin clientID, IP, RSSI, heap trống và uptime.
+                 */
                 if (mqttMutex != NULL && xSemaphoreTake(mqttMutex, portMAX_DELAY) == pdTRUE) {
                     mqttDoc.clear();
 
@@ -157,12 +166,31 @@ void vMqttTask(void *pvParameters) {
                     mqttDoc["freeHeap"] = ESP.getFreeHeap();
                     mqttDoc["uptime"]   = millis() / 1000;
 
+                    /*
+                     * CƠ CHẾ NHẢ MUTEX CHỐNG DEADLOCK (Deadlock Prevention Mechanism):
+                     * BẮT BUỘC nhả mqttMutex tại đây trước khi phát tín hiệu SIG_MQTT_PUBLISH vì các lý do cốt lõi sau:
+                     * 1. Phòng chống Deadlock vòng tròn (Circular Wait):
+                     *    Khi gọi dispatch_signal(SIG_MQTT_PUBLISH), Core Engine sẽ gọi trực tiếp và đồng bộ callback
+                     *    của tất cả các driver phần cứng đã đăng ký. Trong quá trình xử lý, nếu một driver gọi đến bất kỳ
+                     *    hàm nào cần lấy mqttMutex (ví dụ: cập nhật cấu hình MQTT, hoặc đồng bộ hóa với một task khác đang
+                     *    chờ mqttMutex), việc tiếp tục giữ Mutex sẽ gây ra tình trạng khóa chết hệ thống (Deadlock).
+                     * 2. Thu hẹp vùng găng (Minimizing Critical Section):
+                     *    Các thao tác đọc cảm biến của driver phần cứng (như đo đạc I2C, SPI, OneWire) có thể tiêu tốn
+                     *    thời gian trễ (latency). Giải phóng Mutex giúp các tác vụ khác (như Web Server Task gọi
+                     *    updateMqttConfig) không bị nghẽn (blocking) trong suốt khoảng thời gian phần cứng thực thi.
+                     */
                     xSemaphoreGive(mqttMutex);
                 }
 
                 // Core engine dispatches signal for driver data population
+                // Các driver sẽ nhận tín hiệu và gọi mqtt_add_telemetry() để bổ sung dữ liệu đo đạc vào payload
                 dispatch_signal(SIG_MQTT_PUBLISH);
 
+                /*
+                 * GIAI ĐOẠN 2: Chiếm lại Mutex để Serialize JSON và Publish (Vùng găng 2)
+                 * Sau khi toàn bộ driver đã hoàn tất việc nạp dữ liệu telemetry vào mqttDoc,
+                 * task mới chiếm lại mqttMutex để serialize chuỗi JSON và gửi dữ liệu lên Broker một cách toàn vẹn.
+                 */
                 if (mqttMutex != NULL && xSemaphoreTake(mqttMutex, portMAX_DELAY) == pdTRUE) {
                     String jsonBuffer;
                     serializeJson(mqttDoc, jsonBuffer);

@@ -1,5 +1,7 @@
-#include <Arduino.h>
+#include "config.h"
+#ifdef USE_EXAMPLE
 #include "core/core_engine.h"
+#include <Arduino.h>
 // Override weak Xdrv1 function
 bool Xdrv1(Signal_t signal) {
     switch (signal) {
@@ -13,3 +15,5 @@ bool Xdrv1(Signal_t signal) {
             return false; // Not handled
     }
 }
+
+#endif // USE_EXAMPLE

@@ -121,19 +121,17 @@ static UploadContext *accumulate_body_chunk(AsyncWebServerRequest *request, uint
     return ctx;
 }
 
-/** @brief Handles HTTP GET request for LittleFS storage statistics and file directory list ("/api/fs/list"). */
-/*
-{
-  "totalBytes": 1441792,
-  "usedBytes": 28672,
-  "files": [
-      {
-      "name": "/web_config.txt",
-      "size": 120
-      }
-  ]
-}
-*/
+/**
+ * @brief Xử lý HTTP GET request ("/api/fs/list") cung cấp thông số dung lượng và danh sách tập tin LittleFS.
+ * 
+ * @details Hàm thực hiện mapping cấu trúc dữ liệu theo hợp đồng giao tiếp API_FS_SPEC.md:
+ *          - Truy vấn tổng dung lượng (totalBytes) và dung lượng đã dùng (usedBytes).
+ *          - Gọi list_file("/") để lấy chuỗi JSON thô dạng flat dictionary {"filename": size, ...}.
+ *          - Bóc tách và transform cấu trúc sang mảng đối tượng: files: [ { "name": ..., "size": ... }, ... ].
+ *          - Tuân thủ hợp đồng sở hữu bộ nhớ: giải phóng bộ đệm rawListJson bằng free() ngay sau khi parse.
+ * 
+ * @param[in] request Con trỏ đối tượng AsyncWebServerRequest từ client.
+ */
 static void handleFSList(AsyncWebServerRequest *request) {
     if (!web_authenticate(request)) return;
 
@@ -141,30 +139,41 @@ static void handleFSList(AsyncWebServerRequest *request) {
     doc["totalBytes"] = file_system_get_size();
     doc["usedBytes"]  = file_system_get_used();
 
-    // files: []
+    // Khởi tạo mảng "files": [] theo chuẩn API_FS_SPEC.md (Mục 2.1)
     JsonArray filesArray = doc["files"].to<JsonArray>();
 
+    /*
+     * AN TOÀN VÙNG NHỚ & MAPPING JSON THEO API_FS_SPEC.md:
+     * 1. Hợp đồng sở hữu bộ nhớ: Hàm list_file() cấp phát động chuỗi rawListJson trên Heap.
+     *    Caller có trách nhiệm bắt buộc phải giải phóng chuỗi này thông qua free() sau khi dùng.
+     * 2. Cơ chế Transformation/Mapping:
+     *    - Chuỗi trả về từ list_file() là dạng flat JSON: {"/file1.txt": 120, "/file2.txt": 85}
+     *    - Giao diện Web Frontend yêu cầu format theo API_FS_SPEC.md:
+     *      {
+     *        "totalBytes": 1441792,
+     *        "usedBytes": 28672,
+     *        "files": [
+     *          {"name": "/file1.txt", "size": 120},
+     *          {"name": "/file2.txt", "size": 85}
+     *        ]
+     *      }
+     *    Vòng lặp bên dưới parse flat JSON và map sang mảng đối tượng item["name"], item["size"].
+     */
     char *rawListJson = NULL;
     if (list_file("/", &rawListJson) == FS_OK && rawListJson != NULL) {
         JsonDocument listDoc;
-        /* {
-         * "name":
-          "size":
-           }
-        */
         DeserializationError err = deserializeJson(listDoc, rawListJson);
         if (!err) {
             JsonObject rootObj = listDoc.as<JsonObject>();
             for (JsonPair kv : rootObj) {
-                // Add an object{} to array []
                 JsonObject item = filesArray.add<JsonObject>();
-                // Store vale to object instance
                 String filename = kv.key().c_str();
                 size_t size = kv.value().as<size_t>();
                 item["name"] = filename;
                 item["size"] = size;
             }
         }
+        // Giải phóng heap buffer được cấp phát bởi list_file() để chống rò rỉ bộ nhớ
         free(rawListJson);
     }
 
@@ -197,19 +206,41 @@ static void handleFSRead(AsyncWebServerRequest *request) {
     request->send(200, "text/plain", content);
 }
 
-/** @brief Header callback: Executes after all body chunks are received */
+/**
+ * @brief Header callback hoàn tất xử lý HTTP POST lưu/chỉnh sửa file ("/api/fs/save").
+ * 
+ * @details Thực thi sau khi toàn bộ các chunks của POST body đã được tích lũy vào UploadContext.
+ *          Hàm xác thực JSON payload (chứa "path" và "content"), ghi file xuống LittleFS,
+ *          và thực hiện cơ chế giải phóng bộ nhớ an toàn chống Double Free.
+ * 
+ * @param[in] request Con trỏ đối tượng AsyncWebServerRequest từ client.
+ */
 static void handleFSSaveRequest(AsyncWebServerRequest *request) {
     if (!web_authenticate(request)) {
         request->send(401, "text/plain", "Unauthorized");
         return;
     }
-    UploadContext *ctx = (UploadContext*)request->_tempObject; // Get context constructed in body
-    // Check if buffer allocation failed or upload was incomplete
+    UploadContext *ctx = (UploadContext*)request->_tempObject; // Lấy context đã tích lũy trong handleFSSaveBody
+
+    /*
+     * CƠ CHẾ AN TOÀN VÙNG NHỚ & CHỐNG DOUBLE FREE (Memory Safety & Idempotent Cleanup):
+     * Trong suốt quá trình upload dữ liệu body, hàm accumulate_body_chunk đã đăng ký một callback
+     * request->onDisconnect([]() { ... }). Nếu client đột ngột ngắt kết nối mạng (abrupt drop),
+     * onDisconnect sẽ kiểm tra request->_tempObject và gọi delete nếu chưa giải phóng.
+     * 
+     * Để tránh lỗi DOUBLE FREE (Undefined Behavior / Crash hệ thống):
+     * Tại bất kỳ nhánh thoát nào (lỗi cấp phát, lỗi parse JSON, hoặc ghi file thành công):
+     * 1. Luôn thực hiện `delete ctx;`
+     * 2. NGAY LẬP TỨC gán `request->_tempObject = nullptr;`
+     * Việc reset con trỏ về nullptr đảm bảo tính lũy đẳng (Idempotent): nếu sau đó sự kiện onDisconnect
+     * của AsyncWebServer vẫn tiếp tục bắn ra, nó sẽ thấy request->_tempObject == nullptr và bỏ qua.
+     */
+    // Kiểm tra tính toàn vẹn của buffer và dung lượng dữ liệu nhận được
     if (!ctx || !ctx->buffer || ctx->received_size != ctx->total_size) {
         request->send(500, "text/plain", "Upload failed or memory allocation error");
         if (ctx) {
             delete ctx;
-            request->_tempObject = nullptr;
+            request->_tempObject = nullptr; // Reset con trỏ để chống double free
         }
         return;
     }
@@ -222,7 +253,7 @@ static void handleFSSaveRequest(AsyncWebServerRequest *request) {
     DeserializationError err = deserializeJson(doc, (const char*)ctx->buffer, ctx->total_size);
     if (err || !doc.containsKey("path") || !doc.containsKey("content")) {
         delete ctx;
-        request->_tempObject = nullptr;
+        request->_tempObject = nullptr; // Reset con trỏ trước khi gửi response lỗi
         request->send(400, "text/plain", "Invalid JSON payload or missing path/content");
         return;
     }
@@ -232,9 +263,10 @@ static void handleFSSaveRequest(AsyncWebServerRequest *request) {
 
     unsigned int writtenBytes = 0;
     FsResult_t result = write_file(path.c_str(), content, write_length, &writtenBytes);
-    // Free buffer as soon as write is completed
+
+    // Giải phóng ngay lập tức buffer payload sau khi ghi flash xong để trả lại RAM cho hệ thống
     delete ctx;
-    request->_tempObject = nullptr;
+    request->_tempObject = nullptr; // Đảm bảo an toàn tuyệt đối nếu onDisconnect được gọi sau đó
 
     if (result != FS_OK) {
         send_fs_error(request, result);

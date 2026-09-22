@@ -21,4 +21,13 @@
 #define BUILTIN_AUTONICS_TK_GET_PV           "autonics_tk_get_pv"
 #define BUILTIN_AUTONICS_TK_GET_SV           "autonics_tk_get_sv"
 
+void builtins_init(void);
+
+void builtin_json_init(void);
+void builtin_http_init(void);
+void builtin_system_init(void);
+void builtin_console_init(void);
+void builtin_fs_init(void);
+void builtin_nvs_init(void);
+
 #endif // BUILT_IN_H

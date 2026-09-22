@@ -35,7 +35,14 @@ void mqtt_add_telemetry(const String &key, T value);
 /* -------------------------------------------------------------------------- */
 
 /**
- * @brief Entry point invoked exclusively by core_engine to start MQTT Task.
+ * @brief FreeRTOS task quản lý kết nối và xuất bản telemetry lên MQTT Broker định kỳ.
+ * 
+ * @details Task chờ sự kiện mạng sẵn sàng (NET_STATE_WIFI_STA), tải cấu hình từ NVS, duy trì kết nối tới Broker
+ *          qua hàm loop(), và chu kỳ thu thập telemetry/xuất bản dữ liệu.
+ *          Để phòng tránh tình trạng Deadlock giữa các luồng khi các driver phần cứng xử lý tín hiệu SIG_MQTT_PUBLISH,
+ *          task áp dụng cơ chế giải phóng Mutex trước khi dispatch tín hiệu và chỉ chiếm lại Mutex khi serialize JSON.
+ * 
+ * @param[in] pvParameters Con trỏ tham số truyền vào từ FreeRTOS xTaskCreate (không sử dụng, có thể là NULL).
  */
 void vMqttTask(void *pvParameters);
 

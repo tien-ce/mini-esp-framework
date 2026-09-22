@@ -48,50 +48,6 @@ static std::unordered_map<String, CommandHandlerFunc, StringHash> commandMap;
 /*                              STATIC FUNCTIONS                              */
 /* -------------------------------------------------------------------------- */
 
-/* -------------------------------------------------------------------------- */
-/*                        INTERPRETER BUILT-IN FUNCTIONS                      */
-/* -------------------------------------------------------------------------- */
-
-/** @brief Built-in print function callback registered into TienInterpreter engine. */
-static value_t *built_in_print(value_t **argv, int argc) {
-    if (argc == 0) {
-        LOG_INFO("");
-        return val_new_null();
-    }
-    if (argv == NULL) {
-        return val_new_null();
-    }
-    String buffer = "";
-    for (int i = 0; i < argc; i++) {
-        if (argv[i] == NULL) {
-            buffer += "null";
-            continue;
-        }
-        switch (argv[i]->type) {
-            case VAL_STRING:
-                buffer += (argv[i]->string_val ? String(argv[i]->string_val) : "null");
-                break;
-            case VAL_INT:
-                buffer += String(argv[i]->int_val);
-                break;
-            case VAL_FLOAT:
-                buffer += String(argv[i]->float_val, 2);
-                break;
-            case VAL_BOOL:
-                buffer += (argv[i]->bool_val ? "true" : "false");
-                break;
-            case VAL_NULL:
-                buffer += "null";
-                break;
-            default:
-                ti_log("[ERROR] %s: Unexpected type %d\n", BUILTIN_PRINT, argv[i]->type);
-                ti_fatal();
-                break;
-        }
-    }
-    LOG_INFO(buffer);
-    return val_new_null();
-}
 
 /** @brief Command handler: Restarts system. */
 static void esp32_restart(const String &arg) {
@@ -143,20 +99,34 @@ static void backlogHandler(const String &arg) {
     }
 }
 
-/** @brief Parses raw command string and executes matching registered handler. */
+/**
+ * @brief Phân tích cú pháp chuỗi lệnh (Command Parser) và điều phối thực thi hàm callback handler đã đăng ký.
+ * 
+ * @details Hàm này thực hiện quy trình chuẩn hóa và bóc tách chuỗi lệnh đa bước:
+ *          1. Làm sạch chuỗi thô (Sanitization): Xóa khoảng trắng, loại bỏ prompt terminal ('>'), lọc mã màu ANSI escape code, và xóa dấu chấm phẩy cuối.
+ *          2. Xử lý lệnh hàng loạt (Batch / BACKLOG): Nhận diện lệnh BACKLOG tường minh hoặc chuỗi chứa dấu chấm phẩy ';' để chuyển tiếp cho backlogHandler.
+ *          3. Phân tách Tên lệnh (Command Name) và Tham số (Arguments) dựa trên delimiter là dấu hai chấm ':' hoặc khoảng trắng ' '.
+ *          4. Chuẩn hóa Quote: Tước bỏ cặp dấu ngoặc kép ("...") bao quanh tên lệnh và tham số nếu có.
+ *          5. Tra cứu bảng băm (Lookup): Chuyển tên lệnh sang chữ in hoa và gọi hàm callback đã đăng ký trong commandMap.
+ * 
+ * @param[in] raw_cmd Chuỗi lệnh thô nhận được từ Serial Console, Web Terminal hoặc hàng đợi FreeRTOS.
+ */
 static void execute_cmd(const String &raw_cmd) {
     LOG_DEBUG("Raw command received: " + raw_cmd);
 
     String cleanCmd = raw_cmd;
     cleanCmd.trim();
 
-    // Strip leading prompt characters (e.g. ">>> ") if copied from terminal
+    /*
+     * NHÁNH 1: TIỀN XỬ LÝ VÀ CHUẨN HÓA DỮ LIỆU ĐẦU VÀO (Input Sanitization)
+     */
+    // 1.1. Loại bỏ các ký tự dấu nhắc terminal (ví dụ: ">>> ") nếu người dùng copy-paste từ console
     while (cleanCmd.startsWith(">")) {
         cleanCmd = cleanCmd.substring(1);
         cleanCmd.trim();
     }
 
-    // Strip ANSI escape codes (e.g. \033[0m)
+    // 1.2. Loại bỏ các chuỗi mã điều khiển/mã màu ANSI escape sequences (ví dụ: \033[31m hoặc \033[0m)
     while (true) {
         int escIdx = cleanCmd.indexOf('\033');
         if (escIdx == -1) break;
@@ -169,7 +139,7 @@ static void execute_cmd(const String &raw_cmd) {
     }
     cleanCmd.trim();
 
-    // Strip trailing semicolons
+    // 1.3. Loại bỏ các dấu chấm phẩy ';' thừa ở cuối chuỗi lệnh
     while (cleanCmd.endsWith(";")) {
         cleanCmd = cleanCmd.substring(0, cleanCmd.length() - 1);
         cleanCmd.trim();
@@ -177,36 +147,46 @@ static void execute_cmd(const String &raw_cmd) {
 
     if (cleanCmd.length() == 0) return;
 
-    // Check if the command starts with BACKLOG (with or without colon/space)
+    /*
+     * NHÁNH 2: XỬ LÝ LỆNH HÀNG LOẠT (Batch Execution / BACKLOG)
+     */
+    // 2.1. Nhận diện tiền tố BACKLOG tường minh (không phân biệt hoa thường)
+    // Hỗ trợ cú pháp: "BACKLOG:cmd1;cmd2", "BACKLOG cmd1;cmd2", hoặc "BACKLOGcmd1;cmd2"
     String upperCmd = cleanCmd;
     upperCmd.toUpperCase();
     if (upperCmd.startsWith("BACKLOG")) {
         String backlogArgs = "";
         if (upperCmd.startsWith("BACKLOG:")) {
-            backlogArgs = cleanCmd.substring(8);
+            backlogArgs = cleanCmd.substring(8); // Bỏ qua tiền tố "BACKLOG:" (8 ký tự)
         } else if (upperCmd.startsWith("BACKLOG ")) {
-            backlogArgs = cleanCmd.substring(8);
+            backlogArgs = cleanCmd.substring(8); // Bỏ qua tiền tố "BACKLOG " (8 ký tự)
         } else {
-            backlogArgs = cleanCmd.substring(7);
+            backlogArgs = cleanCmd.substring(7); // Bỏ qua tiền tố "BACKLOG" (7 ký tự)
         }
         backlogArgs.trim();
         backlogHandler(backlogArgs);
         return;
     }
 
-    // If string contains multiple commands separated by ';', automatically process as backlog
+    // 2.2. Nhận diện ngầm định (Implicit Backlog): Nếu chuỗi chứa dấu phân cách ';' giữa các lệnh,
+    // tự động kích hoạt backlogHandler để tách nhỏ và đẩy tuần tự từng sub-command vào hàng đợi
     if (cleanCmd.indexOf(';') != -1) {
         backlogHandler(cleanCmd);
         return;
     }
 
+    /*
+     * NHÁNH 3: PHÂN TÁCH TÊN LỆNH (COMMAND NAME) VÀ THAM SỐ (ARGUMENTS)
+     * Quy tắc phân cách: Delimiter đầu tiên xuất hiện có thể là dấu hai chấm ':' hoặc khoảng trắng ' '
+     */
     String name = "";
     String arg = "";
 
-    // Find the first delimiter: either ':' or ' '
+    // Tìm chỉ số xuất hiện đầu tiên của dấu ':' và khoảng trắng ' '
     int colonIdx = cleanCmd.indexOf(':');
     int spaceIdx = cleanCmd.indexOf(' ');
 
+    // Lựa chọn delimiter nào xuất hiện sớm hơn để làm ranh giới giữa tên lệnh và tham số
     int delimiterIdx = -1;
     if (colonIdx != -1 && spaceIdx != -1) {
         delimiterIdx = (colonIdx < spaceIdx) ? colonIdx : spaceIdx;
@@ -220,25 +200,32 @@ static void execute_cmd(const String &raw_cmd) {
         name = cleanCmd.substring(0, delimiterIdx);
         arg = cleanCmd.substring(delimiterIdx + 1);
     } else {
+        // Lệnh đơn không kèm tham số (ví dụ: "STATUS", "RESTART")
         name = cleanCmd;
         arg = "";
     }
 
-    // Sanitize quotes and spaces
+    /*
+     * NHÁNH 4: CHUẨN HÓA DẤU NGOẶC KÉP (QUOTE SANITIZATION) VÀ ĐỊNH DẠNG CHUỖI
+     */
     name.trim();
     arg.trim();
     while (arg.endsWith(";")) {
         arg = arg.substring(0, arg.length() - 1);
         arg.trim();
     }
+    // Tước bỏ cặp dấu ngoặc kép bọc ngoài ("...") nếu tham số hoặc tên lệnh được truyền trong dấu ngoặc kép
     if (name.startsWith("\"") && name.endsWith("\"")) name = name.substring(1, name.length() - 1);
     if (arg.startsWith("\"") && arg.endsWith("\""))   arg = arg.substring(1, arg.length() - 1);
 
-    // Make command name uppercase for case-insensitive lookup
+    // Chuyển tên lệnh sang chữ in hoa để đảm bảo tra cứu không phân biệt chữ hoa/chữ thường (case-insensitive)
     name.toUpperCase();
 
     LOG_DEBUG("Parsed command name: '" + name + "', arg: '" + arg + "'");
 
+    /*
+     * NHÁNH 5: TRA CỨU BẢNG BĂM VÀ THỰC THI CALLBACK (Execution Dispatching)
+     */
     auto it = commandMap.find(name);
     if (it != commandMap.end()) {
         LOG_DEBUG("Executing handler for: " + name);
@@ -479,7 +466,6 @@ void vLogTask(void *pvParameters) {
     register_cmd(CMD_LIST_LOG_LEVEL, listLogLevel);
     register_cmd(CMD_RESTART, esp32_restart);
     register_cmd(CMD_BACKLOG, backlogHandler);
-    register_builtin_function(BUILTIN_PRINT, VAL_VOID, NULL, -1, built_in_print);
     LOG_INFO("vLogTask started, sleeping until command arrives...");
     for (;;) {
 #if !(defined(ARDUINO_USB_CDC_ON_BOOT) && (ARDUINO_USB_CDC_ON_BOOT > 0))
