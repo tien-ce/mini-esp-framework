@@ -86,7 +86,7 @@ static value_t *built_in_nvs_read(value_t **argv, int argc) {
 }
 
 void builtin_nvs_init(void) {
-    /* Use NULL param to bypass static type checking, enabling runtime polymorphism */
-    register_builtin_function("nvs_write", VAL_BOOL, NULL, 2, built_in_nvs_write);
-    register_builtin_function("nvs_read", VAL_NULL, NULL, 2, built_in_nvs_read);
+    /* Use NULL param and argc = -1 to bypass static type checking, enabling runtime polymorphism */
+    register_builtin_function("nvs_write", VAL_BOOL, NULL, -1, built_in_nvs_write);
+    register_builtin_function("nvs_read", VAL_NULL, NULL, -1, built_in_nvs_read);
 }
