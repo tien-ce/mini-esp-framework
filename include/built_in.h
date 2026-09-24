@@ -28,6 +28,7 @@ void builtin_http_init(void);
 void builtin_system_init(void);
 void builtin_console_init(void);
 void builtin_fs_init(void);
+void builtin_web_init(void);
 void builtin_nvs_init(void);
 
 #endif // BUILT_IN_H
