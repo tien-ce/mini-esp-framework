@@ -4,3 +4,6 @@
 [submodule "lib/chashmap"]
 	path = lib/chashmap
 	url = https://github.com/tien-ce/chashmap
+[submodule "lib/Modbus_arduinoIDE"]
+	path = lib/Modbus_arduinoIDE
+	url = https://github.com/tien-ce/Modbus_arduinoIDE.git
