@@ -20,6 +20,7 @@
 #define BUILTIN_AUTONICS_TK_SET_SLAVE_ADDRESS "autonics_tk_set_slave_address"
 #define BUILTIN_AUTONICS_TK_GET_PV           "autonics_tk_get_pv"
 #define BUILTIN_AUTONICS_TK_GET_SV           "autonics_tk_get_sv"
+#define BUILTIN_RUN_SCRIPT                   "run_script"
 
 void builtins_init(void);
 
@@ -30,5 +31,6 @@ void builtin_console_init(void);
 void builtin_fs_init(void);
 void builtin_web_init(void);
 void builtin_nvs_init(void);
+void builtin_script_init(void);
 
 #endif // BUILT_IN_H

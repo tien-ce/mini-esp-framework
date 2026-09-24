@@ -18,7 +18,10 @@ static value_t *built_in_nvs_write(value_t **argv, int argc) {
 
     const char* key = argv[0]->string_val;
     Preferences prefs;
-    prefs.begin(NVS_NAMESPACE, false); // false = Read/Write mode
+    if (!prefs.begin(NVS_NAMESPACE, false)) { // false = Read/Write mode
+        LOG_ERROR_STR("nvs_write: Failed to open NVS namespace '%s'", NVS_NAMESPACE);
+        return val_new_bool(false);
+    }
     bool success = false;
 
     switch (argv[1]->type) {
@@ -40,6 +43,10 @@ static value_t *built_in_nvs_write(value_t **argv, int argc) {
             ti_fatal();
     }
 
+    if (!success) {
+        LOG_ERROR_STR("nvs_write: Failed to write key '%s' to NVS namespace '%s'", key, NVS_NAMESPACE);
+    }
+
     prefs.end();
     return val_new_bool(success);
 }
@@ -56,7 +63,9 @@ static value_t *built_in_nvs_read(value_t **argv, int argc) {
 
     const char* key = argv[0]->string_val;
     Preferences prefs;
-    prefs.begin(NVS_NAMESPACE, true); // true = Read-only mode
+    if (!prefs.begin(NVS_NAMESPACE, true)) { // true = Read-only mode
+        LOG_ERROR_STR("nvs_read: Failed to open NVS namespace '%s' in read-only mode", NVS_NAMESPACE);
+    }
     value_t *ret = NULL;
 
     switch (argv[1]->type) {
