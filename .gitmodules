@@ -1,0 +1,3 @@
+[submodule "lib/TIinterpreter"]
+	path = lib/TIinterpreter
+	url = https://github.com/tien-ce/Write-your-own-interpreter-language
