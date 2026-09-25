@@ -88,40 +88,95 @@ h2 {
   overflow: hidden;
 }
 
-/* Tab Bar */
+
+.toolbar { display: none; }
 .editor-tab-bar {
   display: flex;
-  justify-content: space-between;
   align-items: center;
   background: #12141a;
   border-bottom: 1px solid #282c37;
-  padding: 0 10px;
   user-select: none;
   height: 36px;
 }
+.tabs-container {
+  display: flex;
+  overflow-x: auto;
+  height: 100%;
+}
+.tabs-container::-webkit-scrollbar { display: none; }
 .editor-tab {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 8px 14px;
+  padding: 0 14px;
   font-size: 12.5px;
   font-family: Consolas, Menlo, monospace;
   color: #abb2bf;
-  background: #181a20;
+  background: #12141a;
   border-right: 1px solid #282c37;
-  border-left: 1px solid #282c37;
-  border-top: 2px solid #528bff;
-  height: 36px;
+  border-top: 2px solid transparent;
+  height: 100%;
+  cursor: pointer;
+  white-space: nowrap;
 }
+.editor-tab.active {
+  background: #181a20;
+  border-top: 2px solid #528bff;
+  color: #fff;
+}
+.editor-tab:not(.active):hover {
+  background: #1c1f28;
+}
+
 .tab-icon {
   color: #528bff;
   font-weight: bold;
+}
+.tab-name {
+  user-select: none;
+}
+.tab-close {
+  margin-left: 6px;
+  color: #6e7687;
+  font-weight: bold;
+  font-size: 11px;
+  border-radius: 50%;
+  width: 16px;
+  height: 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: 0.2s;
+  padding-bottom: 1px;
+}
+.tab-close:hover {
+  background: #f85149;
+  color: #fff;
+}
+
+.tab-add {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  color: #abb2bf;
+  cursor: pointer;
+  font-size: 18px;
+  font-weight: bold;
+}
+.tab-add:hover {
+  color: #fff;
+  background: #242933;
 }
 .editor-actions {
   display: flex;
   align-items: center;
   gap: 8px;
+  margin-left: auto;
+  padding-right: 10px;
 }
+
 .btn-editor-action {
   background: #242933;
   color: #abb2bf;
@@ -407,11 +462,11 @@ h2 {
 </div>
 
 <div class='editor-container'>
+    
     <div class='editor-tab-bar'>
-        <div class='editor-tab active'>
-            <span class='tab-icon'>&lt;/&gt;</span>
-            <span id='tabFileName'>script_1.ti</span>
+        <div class='tabs-container' id='tabsContainer'>
         </div>
+        <div class='tab-add' onclick='addNewTab()' title='New File'>+</div>
         <div class='editor-actions'>
             <span class='ws-status' id='wsStatus'>
                 <span class='status-dot' id='wsStatusDot'></span>
@@ -421,6 +476,7 @@ h2 {
             <button class='btn-editor-action' onclick='clearEditorCode()' title='Clear Code'>Clear</button>
         </div>
     </div>
+
     <div class='editor-box'>
         <div class='gutter' id='gutter'><div class='gutter-line active'>1</div></div>
         <div class='editor-wrap'>
@@ -475,16 +531,114 @@ const cmdInput = document.getElementById('cmdInput');
 const highlightPre = document.getElementById('highlightPre');
 const highlightCode = document.getElementById('highlightCode');
 const gutter = document.getElementById('gutter');
-const scriptNameInput = document.getElementById('scriptName');
-const tabFileName = document.getElementById('tabFileName');
 
-// Synchronize task name in input with editor tab filename
-if (scriptNameInput && tabFileName) {
-  scriptNameInput.addEventListener('input', function() {
-    const val = this.value.trim() || 'script_1';
-    tabFileName.textContent = val.endsWith('.ti') ? val : val + '.ti';
-  });
+
+
+let scripts = { 'script_1.ti': '' };
+let activeTab = 'script_1.ti';
+let tabCounter = 1;
+
+
+function renderTabs() {
+  const container = document.getElementById('tabsContainer');
+  if(!container) return;
+  container.innerHTML = '';
+  for (let name in scripts) {
+      const div = document.createElement('div');
+      div.className = 'editor-tab' + (name === activeTab ? ' active' : '');
+      
+      div.onclick = () => switchTab(name);
+      div.ondblclick = (e) => {
+          e.stopPropagation();
+          renameTab(name);
+      };
+      
+      const icon = document.createElement('span');
+      icon.className = 'tab-icon';
+      icon.innerHTML = '&lt;/&gt;';
+      
+      const nameSpan = document.createElement('span');
+      nameSpan.className = 'tab-name';
+      nameSpan.textContent = name;
+      nameSpan.title = 'Double click to rename';
+      
+      const closeBtn = document.createElement('span');
+      closeBtn.className = 'tab-close';
+      closeBtn.innerHTML = '&#10005;';
+      closeBtn.title = 'Close tab';
+      closeBtn.onclick = (e) => {
+          e.stopPropagation();
+          closeTab(name);
+      };
+      
+      div.appendChild(icon);
+      div.appendChild(nameSpan);
+      div.appendChild(closeBtn);
+      container.appendChild(div);
+  }
 }
+
+function closeTab(name) {
+  if (Object.keys(scripts).length <= 1) {
+    alert('Cannot close the last tab. Rename it instead or create a new one first.');
+    return;
+  }
+  
+  delete scripts[name];
+  if (activeTab === name) {
+     activeTab = Object.keys(scripts)[0];
+     cmdInput.value = scripts[activeTab];
+  }
+  renderTabs();
+  renderEditor();
+  updateCursorPos();
+}
+
+function renameTab(oldName) {
+  let newName = prompt('Rename file (must end with .ti):', oldName);
+  if (!newName || newName === oldName) return;
+  
+  newName = newName.trim();
+  if (!newName.endsWith('.ti')) newName += '.ti';
+  
+  if (scripts[newName] !== undefined) {
+     alert('A file with this name already exists!');
+     return;
+  }
+  
+  scripts[newName] = scripts[oldName];
+  delete scripts[oldName];
+  
+  if (activeTab === oldName) {
+     activeTab = newName;
+  }
+  renderTabs();
+}
+
+
+function switchTab(name) {
+  if (activeTab === name) return;
+  scripts[activeTab] = cmdInput.value;
+  activeTab = name;
+  cmdInput.value = scripts[name];
+  
+  renderTabs();
+  renderEditor();
+  updateCursorPos();
+}
+
+function addNewTab() {
+  scripts[activeTab] = cmdInput.value;
+  tabCounter++;
+  let newName = 'script_' + tabCounter + '.ti';
+  while (scripts[newName] !== undefined) {
+      tabCounter++;
+      newName = 'script_' + tabCounter + '.ti';
+  }
+  scripts[newName] = '';
+  switchTab(newName);
+}
+
 
 function updateWsBadge(status) {
   const dot = document.getElementById('wsStatusDot');
@@ -797,6 +951,36 @@ cmdInput.addEventListener('keydown', function(e) {
     }
   }
 
+  
+  // 8. Toggle Line Comment (Ctrl + /)
+  if (e.key === '/' && (e.ctrlKey || e.metaKey)) {
+    e.preventDefault();
+    const firstLineStart = text.lastIndexOf('\n', start - 1) + 1;
+    let lastLineEnd = text.indexOf('\n', end);
+    if (lastLineEnd === -1) lastLineEnd = text.length;
+
+    const lines = text.substring(firstLineStart, lastLineEnd).split('\n');
+    const allCommented = lines.every(line => /^\s*\/\//.test(line) || line.trim() === '');
+    
+    if (allCommented) {
+      const uncommented = lines.map(line => {
+        const match = line.match(/^(\s*)\/\/( ?)/);
+        if (match) {
+          return line.substring(0, match[1].length) + line.substring(match[0].length);
+        }
+        return line;
+      });
+      this.setRangeText(uncommented.join('\n'), firstLineStart, lastLineEnd, 'preserve');
+    } else {
+      const commented = lines.map(line => '// ' + line);
+      this.setRangeText(commented.join('\n'), firstLineStart, lastLineEnd, 'preserve');
+    }
+    
+    renderEditor();
+    updateCursorPos();
+    return;
+  }
+
   // 2. Execute on Ctrl+Enter or Cmd+Enter
   if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
     e.preventDefault();
@@ -974,9 +1158,11 @@ function fallbackCopy() {
   }
 }
 
+
 function clearEditorCode() {
   if (cmdInput.value.length > 0 && confirm('Clear code from editor?')) {
     cmdInput.value = '';
+    scripts[activeTab] = '';
     renderEditor();
     updateCursorPos();
     cmdInput.focus();
@@ -988,16 +1174,15 @@ function sendPayload(payload){
     wsConn.send(JSON.stringify(payload));
   } else {
     console.error("Tien WS not open!");
-    alert("WebSocket not connected to ESP32! Please wait or check connection.");
   }  
 }
 
 function sendConsoleCmd(){
-  let nameInput = document.getElementById('scriptName');
-  let name = nameInput.value.trim();
-  let val = cmdInput.value;
+  scripts[activeTab] = cmdInput.value;
+  let name = activeTab.replace('.ti', '');
+  let val = scripts[activeTab];
   if(name.length === 0){
-    alert('Please enter a script/task name');
+    alert('Invalid tab name');
     return;
   }
   if(val.trim().length > 0){
@@ -1006,12 +1191,7 @@ function sendConsoleCmd(){
 }
 
 function stopConsoleTask(){
-  let nameInput = document.getElementById('scriptName');
-  let name = nameInput.value.trim();
-  if(name.length === 0){
-    alert('Please enter the script/task name to stop');
-    return;
-  }
+  let name = activeTab.replace('.ti', '');
   sendPayload({action:'stop', name:name});
 }
 
@@ -1028,6 +1208,7 @@ window.addEventListener('beforeunload', function() {
   }
 });
 
+renderTabs();
 renderEditor();
 updateCursorPos();
 initWS();

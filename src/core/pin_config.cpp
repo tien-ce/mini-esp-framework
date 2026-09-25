@@ -1,6 +1,6 @@
 #include "core/pin_config.h"
-#include "core/config_manager.h"
-#include "core/log_task.h"
+#include "core/core_nvs.h"
+#include "core/core_log.h"
 
 /* -------------------------------------------------------------------------- */
 /*                              STATIC VARIABLES                              */
@@ -17,20 +17,20 @@ void pin_config_init(void) {
         g_pin_names[i] = "";
     }
 
-    register_config_module("pin_config", "pin_cfg");
+    core_nvs_register_namespace("pin_cfg");
 
     bool has_saved_config = false;
-    if (config_get_lock()) {
+    {
         for (int i = 0; i < MAX_GPIO_PINS; i++) {
             String key = "gpio" + String(i);
-            if (config_has_key("pin_config", key)) {
-                g_pin_names[i] = config_read_string("pin_config", key, "");
+            if (core_nvs_has_key("pin_cfg", key)) {
+                g_pin_names[i] = core_nvs_read_string("pin_cfg", key, "");
                 if (g_pin_names[i].length() > 0) {
                     has_saved_config = true;
                 }
             }
         }
-        config_release_lock();
+        /* lock released */
     }
 
     if (!has_saved_config) {
@@ -53,12 +53,12 @@ void pin_config_init(void) {
 }
 
 void pin_config_save(void) {
-    if (config_get_lock()) {
+    {
         for (int i = 0; i < MAX_GPIO_PINS; i++) {
             String key = "gpio" + String(i);
-            config_save_string("pin_config", key, g_pin_names[i]);
+            core_nvs_save_string("pin_cfg", key, g_pin_names[i]);
         }
-        config_release_lock();
+        /* lock released */
     }
 }
 

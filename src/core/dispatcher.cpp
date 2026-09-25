@@ -173,7 +173,7 @@ void dispatcher_init(void) {
         "DispatcherTask",
         4096,
         NULL,
-        2,
+        5,
         &s_dispatcher_task_handle,
         1
     );

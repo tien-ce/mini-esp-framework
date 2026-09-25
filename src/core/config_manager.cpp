@@ -1,5 +1,5 @@
 #include "core/config_manager.h"
-#include "core/log_task.h"
+#include "core/core_log.h"
 #include <ArduinoJson.h>
 #include <Preferences.h>
 #include <FreeRTOS.h>
