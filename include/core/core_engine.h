@@ -2,14 +2,14 @@
 #define CORE_ENGINE_H
 
 /* Core Headers (public for other modules)*/
-#include "core/config_manager.h"
-#include "core/log_task.h"
-#include "core/wifi_task.h"
-#include "core/web_server_task.h"
+#include "core/core_nvs.h"
+#include "services/logger/log_task.h"
+#include "services/wifi/wifi_task.h"
+#include "services/web/web_server_task.h"
 #include "core/dispatcher.h"
 #include "core/info.h"
 #include "core/pin_config.h"
-#include "core/mqtt_task.h"
+#include "services/mqtt/mqtt_task.h"
 // ============================================================================
 // 1. DOMAIN-SPECIFIC STATE ENUMERATIONS
 // ============================================================================

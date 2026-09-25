@@ -2,8 +2,8 @@
 #include "core/file_system.h"
 #include "core/pin_config.h"
 #include "core/dispatcher.h"
-#include "core/ti_interpreter.h"
-#include "core/log_task.h"
+#include "scripting/ti_interpreter.h"
+#include "services/logger/log_task.h"
 /* -------------------------------------------------------------------------- */
 /*                             DEFINES & CONSTANTS                            */
 /* -------------------------------------------------------------------------- */
@@ -36,8 +36,8 @@ static uint8_t GetDomainOffset(Event_t type) {
     switch (type) {
         case SYSTEM_EVENT:  return 0;
         case NETWORK_EVENT: return SYS_MAX_STATE;
-        case WEB_EVENT:     return SYS_MAX_STATE + NET_MAX_STATE;
-        case MQTT_EVENT:    return SYS_MAX_STATE + NET_MAX_STATE + WEB_MAX_STATE;
+        case WEB_EVENT:     return (uint8_t)SYS_MAX_STATE + (uint8_t)NET_MAX_STATE;
+        case MQTT_EVENT:    return (uint8_t)SYS_MAX_STATE + (uint8_t)NET_MAX_STATE + (uint8_t)WEB_MAX_STATE;
         default:            return 0xFF;
     }
 }
@@ -78,7 +78,7 @@ static bool CoreState_Init(void) {
     LOG_INFO("=== System Booting (SYS_BOOT) ===");
 
     // 4. Init config manager (NVS / Preferences)
-    config_manager_init();
+    core_nvs_init();
 
     // 5. Init file system  
     if(!file_system_init())
@@ -94,6 +94,10 @@ static bool CoreState_Init(void) {
 
     // 8. Init Tien interpreter 
     tien_init();
+
+    // Load saved log level from NVS and apply it to Core Log
+    int32_t saved_log_level = core_nvs_read_int("log", "serial_level", 1); // 1 = LOG_LEVEL_INFO
+    core_log_set_level((LogLevel)saved_log_level);
 
     // Broadcast SYS_BOOT event
     CoreState_SetMode(SYS_BOOT);
@@ -237,7 +241,7 @@ void CoreEngine_Start() {
         "LogTask",
         4096,
         NULL,
-        2,
+        5,
         NULL,
         1
     );
@@ -247,7 +251,7 @@ void CoreEngine_Start() {
         "WifiTask",
         4096,
         NULL,
-        2,
+        3,
         NULL,
         1
     );
@@ -258,7 +262,7 @@ void CoreEngine_Start() {
        "WebMonitorTask",
        4096,
        NULL,
-       1,
+       3,
        NULL,
        1
     );
@@ -269,9 +273,10 @@ void CoreEngine_Start() {
        "MqttTask",
        4096,
        NULL,
-       1,
+       3,
        NULL,
        1
     );
     waiting_on_event(SYSTEM_EVENT, SYS_NORMAL, pdMS_TO_TICKS(5000));
+    tien_run_file("/init.ti");
 }
