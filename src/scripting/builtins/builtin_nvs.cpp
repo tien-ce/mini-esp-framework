@@ -68,6 +68,7 @@ static value_t *built_in_nvs_read(value_t **argv, int argc) {
     }
     value_t *ret = NULL;
 
+    /* Infer the type of value need to get by the type of default value */
     switch (argv[1]->type) {
         case VAL_INT:
             ret = val_new_int(prefs.getInt(key, argv[1]->int_val));

@@ -135,50 +135,34 @@ static UploadContext *accumulate_body_chunk(AsyncWebServerRequest *request, uint
 static void handleFSList(AsyncWebServerRequest *request) {
     if (!web_authenticate(request)) return;
 
+    String dirPath = "/";
+    if (request->hasParam("dir")) {
+        dirPath = request->getParam("dir")->value();
+    }
+
     JsonDocument doc;
     doc["totalBytes"] = file_system_get_size();
     doc["usedBytes"]  = file_system_get_used();
-
-    // Initialize 'files' array according to API_FS_SPEC.md
-    JsonArray filesArray = doc["files"].to<JsonArray>();
 
     /*
      * MEMORY SAFETY & JSON MAPPING BASED ON API_FS_SPEC.md:
      * 1. Memory ownership contract: list_file() dynamically allocates rawListJson on the Heap.
      *    Caller is strictly responsible for freeing this string via free() after use.
-     * 2. Transformation/Mapping Mechanism:
-     *    - String returned from list_file() is a flat JSON: {"/file1.txt": 120, "/file2.txt": 85}
-     *    - Web Frontend UI expects format according to API_FS_SPEC.md:
-     *      {
-     *        "totalBytes": 1441792,
-     *        "usedBytes": 28672,
-     *        "files": [
-     *          {"name": "/file1.txt", "size": 120},
-     *          {"name": "/file2.txt", "size": 85}
-     *        ]
-     *      }
-     *    The loop below parses flat JSON and maps to array of objects item['name'], item['size'].
+     * 2. Transformation/Mapping Mechanism (Lazy Loading):
+     *    - We use `serialized()` to directly inject the JSON array string without double-deserialization.
      */
     char *rawListJson = NULL;
-    if (list_file("/", &rawListJson) == FS_OK && rawListJson != NULL) {
-        JsonDocument listDoc;
-        DeserializationError err = deserializeJson(listDoc, rawListJson);
-        if (!err) {
-            JsonObject rootObj = listDoc.as<JsonObject>();
-            for (JsonPair kv : rootObj) {
-                JsonObject item = filesArray.add<JsonObject>();
-                String filename = kv.key().c_str();
-                size_t size = kv.value().as<size_t>();
-                item["name"] = filename;
-                item["size"] = size;
-            }
-        }
-        // Free heap buffer allocated by list_file() to prevent memory leaks
-        free(rawListJson);
+    if (list_file(dirPath.c_str(), &rawListJson) == FS_OK && rawListJson != NULL) {
+        /* embeded directly the rawListjson(json string (zero parsing)) in to document doc[files] */ 
+        doc["files"] = serialized(rawListJson); // This function only copy the address 
+    } else {
+        doc["files"] = doc.to<JsonArray>();
     }
 
     String responsePayload;
     serializeJson(doc, responsePayload);
+    // Free heap buffer allocated by list_file() to prevent memory leaks
+    free(rawListJson); // Only free after srializeJson
 
     request->send(200, "application/json", responsePayload);
 }
@@ -327,6 +311,27 @@ static void handleFSDeleteRequest(AsyncWebServerRequest *request) {
     request->send(200, "text/plain", "OK");
 }
 
+static void handleFSMkdirRequest(AsyncWebServerRequest *request) {
+    if (!web_authenticate(request)) {
+        request->send(401, "application/json", "{\"status\": \"error\"}");
+        return;
+    }
+
+    if (!request->hasParam("path")) {
+        request->send(400, "application/json", "{\"status\": \"error\"}");
+        return;
+    }
+
+    String path = normalize_fs_path(request->getParam("path")->value());
+
+    FsResult_t result = make_directory(path.c_str());
+    if (result != FS_OK) {
+        request->send(500, "application/json", "{\"status\": \"error\"}");
+        return;
+    }
+    request->send(200, "application/json", "{\"status\": \"success\"}");
+}
+
 /* -------------------------------------------------------------------------- */
 /*                              PUBLIC FUNCTIONS                              */
 /* -------------------------------------------------------------------------- */
@@ -338,4 +343,5 @@ void register_fs_routes(AsyncWebServer *server) {
     server->on("/api/fs/read", HTTP_GET, handleFSRead);
     server->on("/api/fs/save", HTTP_POST, handleFSSaveRequest, NULL, handleFSSaveBody);
     server->on("/api/fs/delete", HTTP_POST, handleFSDeleteRequest);
+    server->on("/api/fs/mkdir", HTTP_POST, handleFSMkdirRequest);
 }
