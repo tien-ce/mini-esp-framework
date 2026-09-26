@@ -41,9 +41,6 @@ void core_nvs_init() {
  * @brief Acquires the recursive mutex for NVS operations.
  */
 static bool core_nvs_get_lock(TickType_t timeout_ticks = portMAX_DELAY) {
-    if (nvsMutex == NULL) {
-        nvsMutex = xSemaphoreCreateRecursiveMutex();
-    }
     return (xSemaphoreTakeRecursive(nvsMutex, timeout_ticks) == pdTRUE);
 }
 
@@ -51,9 +48,7 @@ static bool core_nvs_get_lock(TickType_t timeout_ticks = portMAX_DELAY) {
  * @brief Releases the recursive mutex for NVS operations.
  */
 static void core_nvs_release_lock() {
-    if (nvsMutex != NULL) {
-        xSemaphoreGiveRecursive(nvsMutex);
-    }
+    xSemaphoreGiveRecursive(nvsMutex);
 }
 
 /**
