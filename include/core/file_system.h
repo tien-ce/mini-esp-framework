@@ -36,7 +36,13 @@ typedef enum {
 const char *file_system_strerror(FsResult_t result);
 
 /**
- * @brief Initializes the file system (LittleFS).
+ * @brief Initializes the file system (LittleFS) and its in-memory dentry cache.
+ *
+ * @note Also (re)creates the internal dentry cache used to accelerate path
+ *       and directory resolution for every other function in this header.
+ *       The cache is entirely transparent - it never changes observable
+ *       behavior or return values, only how fast repeated lookups are.
+ *
  * @param formatonfail True to format the file system if mounting fails.
  * @param basepath The base mount point.
  * @param maxopenfiles Maximum number of concurrently open files.
@@ -46,6 +52,8 @@ bool file_system_init(bool formatonfail = true, const char *basepath = "/littlef
 
 /**
  * @brief Formats the LittleFS partition.
+ * @note Also invalidates and rebuilds the in-memory dentry cache, since every
+ *       previously cached path/directory is wiped along with the flash contents.
  * @return true on successful format, false otherwise.
  */
 bool file_system_format();
