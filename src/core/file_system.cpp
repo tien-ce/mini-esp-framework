@@ -534,24 +534,51 @@ FsResult_t read_file(const char *path, char **out_data, unsigned int *out_bytes_
     // 3. Verify LittleFS mount state.
     if (!s_fs_mounted) return FS_ERR_NOT_MOUNTED;
 
-    // 4. Open the file using RAII: the LittleFS File closes itself when out of scope.
-    //    NOTE: the dentry cache is intentionally NOT consulted to skip this open() -
-    //    it never stores file handles or content, only metadata (see dentry_t's note).
+    // 4. Step 1 - In-memory cache validation (frontline gatekeeper): consult
+    //    the dentry cache before ever touching Flash. Two known-negative
+    //    cases can be answered purely from RAM, with zero flash access:
+    //      a) The path is cached as a directory -> FS_ERR_IS_DIRECTORY.
+    //      b) The parent's children are fully resynced (children_loaded) and
+    //         this name is absent from them -> the file cannot exist on
+    //         flash, so FS_ERR_NOT_FOUND without LittleFS.exists()/open().
+    if (strcmp(path, "/") == 0) {
+        return FS_ERR_IS_DIRECTORY; // Root is always a directory.
+    }
+    if (dentry_lock()) {
+        char name[MAX_FILE_NAME];
+        dentry_t *parent = dentry_resolve_parent(path, name, sizeof(name));
+        if (parent) {
+            dentry_t *cached = dentry_table_lookup(parent, name);
+            if (cached && cached->is_dir) {
+                dentry_unlock();
+                return FS_ERR_IS_DIRECTORY;
+            }
+            if (!cached && parent->children_loaded) {
+                dentry_unlock();
+                return FS_ERR_NOT_FOUND;
+            }
+        }
+        dentry_unlock();
+    }
+
+    // 5. Step 2 - Flash I/O: the cache could not resolve this with certainty
+    //    above, so open the file using RAII (the LittleFS File closes itself
+    //    when out of scope).
     File file = LittleFS.open(path, "r", false);
 
-    // 5. Disambiguate open failures (FS_ERR_NOT_FOUND vs FS_ERR_OPEN_FAILED).
+    // 6. Disambiguate open failures (FS_ERR_NOT_FOUND vs FS_ERR_OPEN_FAILED).
     if (!file) {
         return LittleFS.exists(path) ? FS_ERR_OPEN_FAILED : FS_ERR_NOT_FOUND;
     }
 
-    // 6. Reject if the path is a directory.
+    // 7. Reject if the path turned out to be a directory (cache didn't know).
     if (file.isDirectory()) {
         return FS_ERR_IS_DIRECTORY;
     }
 
     size_t size = file.size();
 
-    // 7. Allocate dynamic memory (prefer PSRAM if available, fallback to malloc).
+    // 8. Allocate dynamic memory (prefer PSRAM if available, fallback to malloc).
     //    Allocation size: size + 1 byte for the null-terminator '\0'.
     //    NOTE: caller inherits ownership and must release it via free().
     #ifdef SYSTEM_USES_PSRAM
@@ -564,17 +591,17 @@ FsResult_t read_file(const char *path, char **out_data, unsigned int *out_bytes_
         return FS_ERR_ALLOC_FAILED;
     }
 
-    // 8. Read flash data into the buffer and append the null-terminator.
+    // 9. Read flash data into the buffer and append the null-terminator.
     size_t readLen = file.readBytes(buffer, size);
     buffer[readLen] = '\0';
 
-    // 9. Transfer memory ownership to the caller.
+    // 10. Transfer memory ownership to the caller.
     *out_data = buffer;
     *out_bytes_read = readLen;
 
-    // 10. Write-through: now that this file's exact size is known, memoize
-    //     it (or refresh a stale cached size) so a subsequent path
-    //     resolution through it is an O(1) cache hit.
+    // 11. Step 3 - Cache synchronization (write-through): now that this
+    //     file's exact size is known, memoize it (or refresh a stale cached
+    //     size) so a subsequent path resolution through it is an O(1) hit.
     if (dentry_lock()) {
         dentry_t *entry = dentry_get_or_create(path, false);
         if (entry) {
@@ -592,15 +619,40 @@ FsResult_t write_file(const char *path, const char *data, unsigned int length, u
 {
     if (out_bytes_written) *out_bytes_written = 0;
 
-    // Validate inputs.
+    // 1. Validate inputs.
     if (!path || !data) return FS_ERR_INVALID_ARG;
     if (!s_fs_mounted) return FS_ERR_NOT_MOUNTED;
 
-    // Open file for writing.
+    // 2. Step 1 - In-memory cache validation (frontline gatekeeper):
+    //    a) Refuse writing to root outright - it is always a directory.
+    //    b) Resolve the parent through the dentry cache. A NULL result means
+    //       the parent directory does not exist (dentry_resolve_parent()
+    //       already tried a single flash probe for any uncached intermediate
+    //       directory), so fail fast without ever calling LittleFS.open().
+    //    c) If the final component is already cached as a directory, reject
+    //       immediately instead of opening it on flash just to find out.
+    if (strcmp(path, "/") == 0) return FS_ERR_IS_DIRECTORY;
+
+    if (dentry_lock()) {
+        char name[MAX_FILE_NAME];
+        dentry_t *parent = dentry_resolve_parent(path, name, sizeof(name));
+        if (!parent) {
+            dentry_unlock();
+            return FS_ERR_NOT_FOUND; // Parent directory doesn't exist.
+        }
+        dentry_t *existing = dentry_table_lookup(parent, name);
+        if (existing && existing->is_dir) {
+            dentry_unlock();
+            return FS_ERR_IS_DIRECTORY;
+        }
+        dentry_unlock();
+    }
+
+    // 3. Step 2 - Flash I/O: open (creating/truncating) the file for writing.
     File file = LittleFS.open(path, "w", false);
     if (!file) return FS_ERR_OPEN_FAILED;
     if (file.isDirectory()) {
-        return FS_ERR_IS_DIRECTORY;
+        return FS_ERR_IS_DIRECTORY; // Defensive: cache missed it, flash didn't.
     }
 
     size_t bytesWrite = file.write((const uint8_t*)data, length);
@@ -609,9 +661,9 @@ FsResult_t write_file(const char *path, const char *data, unsigned int length, u
 
     bool complete = (bytesWrite == length);
 
-    // Write-through: only memoize the entry once the write actually
-    // succeeded in full - a partial write should not make a half-written
-    // file look trustworthy in the cache.
+    // 4. Step 3 - Cache synchronization (write-through): only memoize the
+    //    entry once the write actually succeeded in full - a partial write
+    //    should not make a half-written file look trustworthy in the cache.
     if (complete && dentry_lock()) {
         dentry_t *entry = dentry_get_or_create(path, false);
         if (entry) {
@@ -732,16 +784,39 @@ FsResult_t list_file(const char *dir_path, char **out_json)
 /** @brief Removes a file from the file system. */
 FsResult_t remove_file(const char *path)
 {
-    // Validate arguments and state.
+    // 1. Validate arguments and state.
     if (!path) return FS_ERR_INVALID_ARG;
     if (!s_fs_mounted) return FS_ERR_NOT_MOUNTED;
-    if (!LittleFS.exists(path)) return FS_ERR_NOT_FOUND;
 
-    // Attempt removal.
+    // 2. Step 1 - In-memory cache validation (frontline gatekeeper): fail
+    //    fast on a known type mismatch (cached as a directory) or a
+    //    confirmed absence (parent's children are fully resynced and this
+    //    name isn't among them) without ever calling LittleFS.exists().
+    if (dentry_lock()) {
+        char name[MAX_FILE_NAME];
+        dentry_t *parent = dentry_resolve_parent(path, name, sizeof(name));
+        if (parent) {
+            dentry_t *cached = dentry_table_lookup(parent, name);
+            if (cached && cached->is_dir) {
+                dentry_unlock();
+                return FS_ERR_IS_DIRECTORY;
+            }
+            if (!cached && parent->children_loaded) {
+                dentry_unlock();
+                return FS_ERR_NOT_FOUND;
+            }
+        }
+        dentry_unlock();
+    }
+
+    // 3. Step 2 - Flash I/O: cache couldn't answer with certainty, confirm
+    //    existence on flash before attempting removal.
+    if (!LittleFS.exists(path)) return FS_ERR_NOT_FOUND;
     bool ok = LittleFS.remove(path);
 
-    // Write-through: the path is gone, so its cached dentry (if any) is now
-    // stale - evict it so nothing can resolve it again by mistake.
+    // 4. Step 3 - Cache synchronization (write-through): the path is gone,
+    //    so its cached dentry (if any) is now stale - evict it so nothing
+    //    can resolve it again by mistake.
     if (ok && dentry_lock()) {
         dentry_evict_path(path);
         dentry_unlock();
@@ -775,18 +850,37 @@ FsResult_t rename_file(const char *pathFrom, const char *pathTo)
 /** @brief Creates a directory. */
 FsResult_t make_directory(const char *path)
 {
-    // Validate arguments and state.
+    // 1. Validate arguments and state.
     if (!path) return FS_ERR_INVALID_ARG;
     if (!s_fs_mounted) return FS_ERR_NOT_MOUNTED;
-    if (LittleFS.exists(path)) return FS_ERR_ALREADY_EXISTS;
 
-    // Attempt creation.
+    // 2. Step 1 - In-memory cache validation (frontline gatekeeper): fail
+    //    fast if the cache already knows this path exists (either type - a
+    //    conflicting file counts as "already exists" too), skipping
+    //    LittleFS.exists().
+    if (dentry_lock()) {
+        char name[MAX_FILE_NAME];
+        dentry_t *parent = dentry_resolve_parent(path, name, sizeof(name));
+        if (parent) {
+            dentry_t *cached = dentry_table_lookup(parent, name);
+            if (cached) {
+                dentry_unlock();
+                return FS_ERR_ALREADY_EXISTS;
+            }
+        }
+        dentry_unlock();
+    }
+
+    // 3. Step 2 - Flash I/O: cache couldn't confirm absence with certainty,
+    //    double-check on flash before creating.
+    if (LittleFS.exists(path)) return FS_ERR_ALREADY_EXISTS;
     bool ok = LittleFS.mkdir(path);
 
-    // Write-through: memoize the freshly created directory so the next
-    // path resolution through it is a cache hit instead of a flash probe.
-    // Force is_dir=true even on a cache hit, in case a stale ghost entry
-    // (e.g. left over from a race with another task) was resolved instead.
+    // 4. Step 3 - Cache synchronization (write-through): memoize the freshly
+    //    created directory so the next path resolution through it is a
+    //    cache hit instead of a flash probe. Force is_dir=true even on a
+    //    cache hit, in case a stale ghost entry (e.g. left over from a race
+    //    with another task) was resolved instead.
     if (ok && dentry_lock()) {
         dentry_t *entry = dentry_get_or_create(path, true);
         if (entry) entry->is_dir = true;
@@ -799,16 +893,39 @@ FsResult_t make_directory(const char *path)
 /** @brief Removes a directory. */
 FsResult_t remove_dir(const char *path)
 {
-    // Validate arguments and state.
+    // 1. Validate arguments and state.
     if (!path) return FS_ERR_INVALID_ARG;
     if (!s_fs_mounted) return FS_ERR_NOT_MOUNTED;
-    if (!LittleFS.exists(path)) return FS_ERR_NOT_FOUND;
 
-    // Attempt removal.
+    // 2. Step 1 - In-memory cache validation (frontline gatekeeper): fail
+    //    fast on a known type mismatch (cached as a plain file) or a
+    //    confirmed absence (parent's children are fully resynced and this
+    //    name isn't among them) without ever calling LittleFS.exists().
+    if (dentry_lock()) {
+        char name[MAX_FILE_NAME];
+        dentry_t *parent = dentry_resolve_parent(path, name, sizeof(name));
+        if (parent) {
+            dentry_t *cached = dentry_table_lookup(parent, name);
+            if (cached && !cached->is_dir) {
+                dentry_unlock();
+                return FS_ERR_NOT_A_DIRECTORY;
+            }
+            if (!cached && parent->children_loaded) {
+                dentry_unlock();
+                return FS_ERR_NOT_FOUND;
+            }
+        }
+        dentry_unlock();
+    }
+
+    // 3. Step 2 - Flash I/O: cache couldn't answer with certainty, confirm
+    //    existence on flash before attempting removal.
+    if (!LittleFS.exists(path)) return FS_ERR_NOT_FOUND;
     bool ok = LittleFS.rmdir(path);
 
-    // Write-through: the directory (and, defensively, any cached
-    // descendants - see dentry_evict()) is gone from flash; drop it.
+    // 4. Step 3 - Cache synchronization (write-through): the directory (and,
+    //    defensively, any cached descendants - see dentry_evict()) is gone
+    //    from flash; drop it.
     if (ok && dentry_lock()) {
         dentry_evict_path(path);
         dentry_unlock();
