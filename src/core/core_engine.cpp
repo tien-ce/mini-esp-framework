@@ -233,6 +233,9 @@ void CoreEngine_Start() {
     // exist yet, waiting_on_event() would bail out immediately instead of blocking.
     if (!CoreState_Init())
       return;
+    // Create the MQTT mutex before any task/script can call the MQTT API.
+    if (!mqtt_init())
+      return;
     /* Starting intialize task */
     CoreState_SetMode(SYS_SETUP);
     // Task: Log & Command Processing Task (Priority 2)

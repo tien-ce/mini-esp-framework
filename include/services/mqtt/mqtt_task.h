@@ -25,24 +25,33 @@ void updateMqttConfig(const String &server, uint16_t port, const String &user,
 /* -------------------------------------------------------------------------- */
 
 /**
- * @brief Thread-safe API for drivers to add any telemetry key-value pair.
+ * @brief Create the MQTT mutex. Call once, single-threaded, before starting any task that uses the MQTT API.
+ *
+ * @return true if the mutex exists after the call, false on allocation failure.
+ */
+bool mqtt_init();
+
+/**
+ * @brief Thread-safe API to add a telemetry key-value pair to the MQTT payload.
+ *
+ * Supported value types: int, float, double, bool, const char*, char*, String.
+ * Must not be called while the caller already holds the MQTT mutex.
+ *
+ * @param[in] key   Telemetry field name.
+ * @param[in] value Telemetry field value.
+ * @return true if the pair was stored, false if the mutex could not be taken.
  */
 template <typename T>
-void mqtt_add_telemetry(const String &key, T value);
+bool mqtt_add_telemetry(const String &key, T value);
 
 /* -------------------------------------------------------------------------- */
 /*                              CORE ENGINE API                               */
 /* -------------------------------------------------------------------------- */
 
 /**
- * @brief FreeRTOS task quản lý kết nối và xuất bản telemetry lên MQTT Broker định kỳ.
- * 
- * @details Task chờ sự kiện mạng sẵn sàng (NET_STATE_WIFI_STA), tải cấu hình từ NVS, duy trì kết nối tới Broker
- *          qua hàm loop(), và chu kỳ thu thập telemetry/xuất bản dữ liệu.
- *          Để phòng tránh tình trạng Deadlock giữa các luồng khi các driver phần cứng xử lý tín hiệu SIG_MQTT_PUBLISH,
- *          task áp dụng cơ chế giải phóng Mutex trước khi dispatch tín hiệu và chỉ chiếm lại Mutex khi serialize JSON.
- * 
- * @param[in] pvParameters Con trỏ tham số truyền vào từ FreeRTOS xTaskCreate (không sử dụng, có thể là NULL).
+ * @brief FreeRTOS task that maintains the MQTT broker connection and periodically publishes telemetry.
+ *
+ * @param[in] pvParameters FreeRTOS task parameter (unused, may be NULL).
  */
 void vMqttTask(void *pvParameters);
 

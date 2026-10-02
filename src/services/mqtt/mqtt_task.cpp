@@ -29,15 +29,15 @@ static SemaphoreHandle_t mqttMutex = NULL;
 
 static JsonDocument mqttDoc;
 
+/** Max time a caller waits for mqttMutex in mqtt_add_telemetry(). */
+#define MQTT_TELEMETRY_LOCK_TIMEOUT_MS 1000
+
+/** PubSubClient packet buffer size; must exceed topic + serialized telemetry JSON. */
+#define MQTT_PACKET_BUFFER_SIZE 2048
+
 /* -------------------------------------------------------------------------- */
 /*                              STATIC FUNCTIONS                              */
 /* -------------------------------------------------------------------------- */
-
-static void initMqttMutex() {
-    if (mqttMutex == NULL) {
-        mqttMutex = xSemaphoreCreateMutex();
-    }
-}
 
 static void saveMqttConfig() {
     if (mqttMutex != NULL && xSemaphoreTake(mqttMutex, portMAX_DELAY) == pdTRUE) {
@@ -56,7 +56,6 @@ static void saveMqttConfig() {
 }
 
 static void loadMqttConfig() {
-    initMqttMutex();
     core_nvs_register_namespace("mqtt");
 
     if (mqttMutex != NULL && xSemaphoreTake(mqttMutex, portMAX_DELAY) == pdTRUE) {
@@ -80,6 +79,10 @@ static void connectBroker() {
 
     String clientId = String(esp_info_get_model()) + "_" + String(esp_info_get_mac_str());
     mqttClient.setServer(mqtt_server.c_str(), mqtt_port);
+    /* PubSubClient defaults to a 256-byte packet buffer; larger publishes are silently dropped */
+    if (!mqttClient.setBufferSize(MQTT_PACKET_BUFFER_SIZE)) {
+        LOG_ERROR("Failed to allocate MQTT packet buffer");
+    }
 
     LOG_INFO("Connecting to MQTT Broker: " + mqtt_server);
 
@@ -132,8 +135,19 @@ void updateMqttConfig(const String &server, uint16_t port, const String &user,
 
 
 /**
- * @brief FreeRTOS task quản lý vòng đời kết nối MQTT Broker và chu kỳ xuất bản dữ liệu Telemetry.
- * @param[in] pvParameters Tham số tác vụ FreeRTOS (không sử dụng).
+ * @brief Create the MQTT mutex; must run once before any task using the MQTT API starts.
+ * @return true if the mutex exists after the call, false on allocation failure.
+ */
+bool mqtt_init() {
+    if (mqttMutex == NULL) {
+        mqttMutex = xSemaphoreCreateMutex();
+    }
+    return mqttMutex != NULL;
+}
+
+/**
+ * @brief MQTT task: connect to the broker, collect telemetry and publish periodically.
+ * @param[in] pvParameters Unused.
  */
 void vMqttTask(void *pvParameters) {
     waiting_on_event(NETWORK_EVENT, NET_STATE_WIFI_STA, portMAX_DELAY);
@@ -151,14 +165,10 @@ void vMqttTask(void *pvParameters) {
             mqttClient.loop();
 
             if (mqttClient.connected()) {
-                /*
-                 * GIAI ĐOẠN 1: Nạp metadata hệ thống vào đối tượng JSON (Vùng găng 1)
-                 * Lấy mqttMutex để đảm bảo an toàn truy cập vào tài nguyên dùng chung mqttDoc.
-                 * Ghi nhận thông tin clientID, IP, RSSI, heap trống và uptime.
-                 */
+                /* Step 1: Refresh system metadata under the mutex. The document is NOT cleared:
+                 * script/driver values pushed via mqtt_add_telemetry() between publishes must
+                 * survive until the next publish; each key is simply overwritten on update. */
                 if (mqttMutex != NULL && xSemaphoreTake(mqttMutex, portMAX_DELAY) == pdTRUE) {
-                    mqttDoc.clear();
-
                     String clientID = getWifiClientID();
                     mqttDoc["clientID"] = clientID.length() > 0 ? clientID : (String(esp_info_get_model()) + "_" + String(esp_info_get_mac_str()));
                     mqttDoc["ip"]       = WiFi.localIP().toString();
@@ -166,37 +176,24 @@ void vMqttTask(void *pvParameters) {
                     mqttDoc["freeHeap"] = ESP.getFreeHeap();
                     mqttDoc["uptime"]   = millis() / 1000;
 
-                    /*
-                     * CƠ CHẾ NHẢ MUTEX CHỐNG DEADLOCK (Deadlock Prevention Mechanism):
-                     * BẮT BUỘC nhả mqttMutex tại đây trước khi phát tín hiệu SIG_MQTT_PUBLISH vì các lý do cốt lõi sau:
-                     * 1. Phòng chống Deadlock vòng tròn (Circular Wait):
-                     *    Khi gọi dispatch_signal(SIG_MQTT_PUBLISH), Core Engine sẽ gọi trực tiếp và đồng bộ callback
-                     *    của tất cả các driver phần cứng đã đăng ký. Trong quá trình xử lý, nếu một driver gọi đến bất kỳ
-                     *    hàm nào cần lấy mqttMutex (ví dụ: cập nhật cấu hình MQTT, hoặc đồng bộ hóa với một task khác đang
-                     *    chờ mqttMutex), việc tiếp tục giữ Mutex sẽ gây ra tình trạng khóa chết hệ thống (Deadlock).
-                     * 2. Thu hẹp vùng găng (Minimizing Critical Section):
-                     *    Các thao tác đọc cảm biến của driver phần cứng (như đo đạc I2C, SPI, OneWire) có thể tiêu tốn
-                     *    thời gian trễ (latency). Giải phóng Mutex giúp các tác vụ khác (như Web Server Task gọi
-                     *    updateMqttConfig) không bị nghẽn (blocking) trong suốt khoảng thời gian phần cứng thực thi.
-                     */
+                    /* Release the mutex before dispatching: drivers call mqtt_add_telemetry(),
+                     * which takes it again (avoids deadlock and keeps the critical section short). */
                     xSemaphoreGive(mqttMutex);
                 }
 
-                // Core engine dispatches signal for driver data population
-                // Các driver sẽ nhận tín hiệu và gọi mqtt_add_telemetry() để bổ sung dữ liệu đo đạc vào payload
+                /* Step 2: Let drivers append their telemetry via mqtt_add_telemetry() */
                 dispatch_signal(SIG_MQTT_PUBLISH);
 
-                /*
-                 * GIAI ĐOẠN 2: Chiếm lại Mutex để Serialize JSON và Publish (Vùng găng 2)
-                 * Sau khi toàn bộ driver đã hoàn tất việc nạp dữ liệu telemetry vào mqttDoc,
-                 * task mới chiếm lại mqttMutex để serialize chuỗi JSON và gửi dữ liệu lên Broker một cách toàn vẹn.
-                 */
+                /* Step 3: Re-take the mutex, serialize the payload and publish it */
                 if (mqttMutex != NULL && xSemaphoreTake(mqttMutex, portMAX_DELAY) == pdTRUE) {
                     String jsonBuffer;
                     serializeJson(mqttDoc, jsonBuffer);
+                    LOG_INFO_STR("Mqtt publish: %s",jsonBuffer.c_str());
 
                     if (mqtt_data_topic.length() > 0) {
-                        mqttClient.publish(mqtt_data_topic.c_str(), jsonBuffer.c_str());
+                        if (!mqttClient.publish(mqtt_data_topic.c_str(), jsonBuffer.c_str())) {
+                            LOG_ERROR("MQTT publish failed, payload bytes=" + String(jsonBuffer.length()));
+                        }
                     }
                     xSemaphoreGive(mqttMutex);
                 }
@@ -212,15 +209,26 @@ void vMqttTask(void *pvParameters) {
 /* -------------------------------------------------------------------------- */
 
 template <typename T>
-void mqtt_add_telemetry(const String &key, T value) {
+bool mqtt_add_telemetry(const String &key, T value) {
+    /* Step 1: Reject the call if mqtt_init() has not created the mutex yet */
+    if (mqttMutex == NULL) return false;
+
+    /* Step 2: Write the pair into the shared document under the mutex */
+    if (xSemaphoreTake(mqttMutex, pdMS_TO_TICKS(MQTT_TELEMETRY_LOCK_TIMEOUT_MS)) != pdTRUE) {
+        LOG_ERROR("mqtt_add_telemetry: mutex timeout for key " + key);
+        return false;
+    }
     mqttDoc[key] = value;
-    LOG_DEBUG("Added telemetry: " + key + " = " + String(value));
+    xSemaphoreGive(mqttMutex);
+
+    LOG_DEBUG("Added telemetry: " + key);
+    return true;
 }
 
-template void mqtt_add_telemetry<int>(const String&, int);
-template void mqtt_add_telemetry<float>(const String&, float);
-template void mqtt_add_telemetry<double>(const String&, double);
-template void mqtt_add_telemetry<char*>(const String&, char*);
-template void mqtt_add_telemetry<const char*>(const String&, const char*);
-template void mqtt_add_telemetry<String>(const String&, String);
-template void mqtt_add_telemetry<bool>(const String&, bool);
+template bool mqtt_add_telemetry<int>(const String&, int);
+template bool mqtt_add_telemetry<float>(const String&, float);
+template bool mqtt_add_telemetry<double>(const String&, double);
+template bool mqtt_add_telemetry<char*>(const String&, char*);
+template bool mqtt_add_telemetry<const char*>(const String&, const char*);
+template bool mqtt_add_telemetry<String>(const String&, String);
+template bool mqtt_add_telemetry<bool>(const String&, bool);

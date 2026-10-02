@@ -31,6 +31,7 @@ void builtin_console_init(void);
 void builtin_fs_init(void);
 void builtin_web_init(void);
 void builtin_nvs_init(void);
+void builtin_mqtt_init(void);
 void builtin_script_init(void);
 
 #endif // BUILT_IN_H
