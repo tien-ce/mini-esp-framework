@@ -3,8 +3,18 @@
 
 #include <Arduino.h>
 
-/** @brief Renders HTML templates by replacing dynamic system placeholders. */
+/**
+ * @brief Renders an HTML template by expanding every known %PLACEHOLDER% in a single scan.
+ * @param templateStr NUL-terminated template text (e.g. a PROGMEM page).
+ * @return The rendered page, or an empty String on invalid input or allocation failure.
+ */
 String web_render_template(const char* templateStr);
+
+/**
+ * @brief Writes the GPIO pin mapping as JSON (shared option list + one entry per board pin).
+ * @param out Destination stream, typically an AsyncResponseStream.
+ */
+void web_build_gpio_json(Print &out);
 
 /** @brief Updates dynamic telemetry key-value pair for HTTP polling responses. */
 void updateElementValue(const String& key, const String& newValue);
