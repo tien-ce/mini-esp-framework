@@ -18,3 +18,39 @@ Thumbs.db
 # Tool
 *.py
 *.js
+
+# AI Assistant files & Agent configurations
+CLAUDE*.md
+GEMINI*.md
+BACKEND_REQUEST.md
+FRONTEND_REQUESTS.md
+.claude/
+.agent_memory.json
+
+# Editor, Language Server & Clangd
+.clangd
+.nvim.lua
+compile_commands.json
+nvim/
+
+# Logs & Debug Dumps
+*.log
+log_*.txt
+esp32_log_*.txt
+
+# Local Scripts, Tools & Symlinks
+esp_log.sh
+fix_and_build.sh
+esp_tool_symlink
+Test_Project_Symlink
+
+# Device & Hardware Test Dumps
+Device/
+Image/
+chamber_check/
+html_test/
+tien_files/
+txt/
+test_relay.ti
+API_FS_SPEC.md
+
