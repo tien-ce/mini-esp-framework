@@ -20,7 +20,7 @@ static RelayConfig_t s_relays[MAX_RELAYS];
 /* -------------------------------------------------------------------------- */
 
 /** @brief Built-in relay_get_state function returning relay state (1 for ON, 0 for OFF). */
-static value_t *built_in_relay_get_state(value_t **argv, int argc) {
+static value_t *built_in_relay_get_state(ti_handle_t handle, value_t **argv, int argc) {
     if (argc != 1 || argv == NULL || argv[0] == NULL || argv[0]->type != VAL_INT) {
         ti_log("[ERROR] %s: Expect 1 integer argument (relay_number 1-%d)\n", BUILTIN_RELAY_GET_STATE, MAX_RELAYS);
         ti_fatal();
@@ -57,7 +57,7 @@ static value_t *built_in_relay_get_state(value_t **argv, int argc) {
  * @param[in] argc Số lượng tham số truyền vào (bắt buộc = 2).
  * @return value_t* Con trỏ đối tượng boolean biểu diễn kết quả thành công/thất bại của thao tác.
  */
-static value_t *built_in_relay_set_state(value_t **argv, int argc) {
+static value_t *built_in_relay_set_state(ti_handle_t handle, value_t **argv, int argc) {
     if (argc != 2 || argv == NULL || argv[0] == NULL || argv[1] == NULL || argv[0]->type != VAL_INT) {
         ti_log("[ERROR] %s: Expect 2 arguments (relay_number, state)\n", BUILTIN_RELAY_SET_STATE);
         ti_fatal();

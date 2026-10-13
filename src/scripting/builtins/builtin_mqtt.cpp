@@ -9,7 +9,7 @@
  * @param argc Argument count (must be 2).
  * @return Boolean value_t: true if the pair was stored, false otherwise.
  */
-static value_t *built_in_mqtt_update(value_t **argv, int argc) {
+static value_t *built_in_mqtt_update(ti_handle_t handle, value_t **argv, int argc) {
     /* Step 1: Validate arguments */
     if (argc != 2 || argv == NULL || argv[0] == NULL || argv[1] == NULL ||
         argv[0]->type != VAL_STRING || argv[0]->string_val == NULL) {

@@ -78,7 +78,7 @@ static bool CheckRS485PinConfig() {
     return true;
 }
 
-static value_t *autonic_read(value_t **argv, int argc) {
+static value_t *autonic_read(ti_handle_t handle, value_t **argv, int argc) {
     int slave_id = argv[0]->int_val;
     value_t *dict_val = val_new_dict();
 

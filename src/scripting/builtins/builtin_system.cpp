@@ -4,7 +4,7 @@
 #include "core/core_log.h"
 #include <Arduino.h>
 
-static value_t *built_in_is_none(value_t **argv, int argc)
+static value_t *built_in_is_none(ti_handle_t handle, value_t **argv, int argc)
 {
     if (argc != 1 || argv == NULL) {
         ti_log("[ERROR] %s: Expect 1 variable \n", BUILTIN_IS_NONE);
@@ -21,7 +21,7 @@ static value_t *built_in_is_none(value_t **argv, int argc)
 }
 
 /** @brief Built-in delay function to pause script execution for N milliseconds. */
-static value_t *built_in_delay(value_t **argv, int argc) {
+static value_t *built_in_delay(ti_handle_t handle, value_t **argv, int argc) {
     if (argc != 1 || argv == NULL || argv[0] == NULL) {
         ti_log("[ERROR] %s: Invalid argument count, expect 1\n", BUILTIN_DELAY);
         ti_fatal();

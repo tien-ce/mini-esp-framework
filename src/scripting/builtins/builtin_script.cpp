@@ -20,7 +20,7 @@
  * @param argc Number of arguments passed.
  * @return value_t* Boolean true on successful invocation.
  */
-static value_t *built_in_run_script(value_t **argv, int argc) {
+static value_t *built_in_run_script(ti_handle_t handle, value_t **argv, int argc) {
     if (argc != 2 || argv == NULL || argv[0] == NULL || argv[1] == NULL ||
         argv[0]->type != VAL_STRING || argv[1]->type != VAL_STRING ||
         argv[0]->string_val == NULL || argv[1]->string_val == NULL) {

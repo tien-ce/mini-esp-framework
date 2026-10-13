@@ -9,9 +9,9 @@
 #include "include/ti_runtime.h"
 typedef struct {
     char name[32]; /* Name of script used to manage */
-    ti_runtime_t *runtime; /* runtime pointer used to stop task safely*/
+    ti_handle_t handle;    /* runtime handle used to stop task safely (stale handles are rejected) */
     char *source_code; // pointer use to allocate new code, avoid code is deleted in build time
-} ti_task_t;
+} tien_task_t;
 
 /** @brief Executes a Tien script from a LittleFS file path. */
 void tien_run_file(const char *path);

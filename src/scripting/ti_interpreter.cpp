@@ -19,7 +19,7 @@
 /*                              STATIC VARIABLES                              */
 /* -------------------------------------------------------------------------- */
 
-static std::vector<ti_task_t> g_tien_tasks;
+static std::vector<tien_task_t> g_tien_tasks;
 /* -------------------------------------------------------------------------- */
 /*                              STATIC FUNCTIONS                              */
 /* -------------------------------------------------------------------------- */
@@ -28,7 +28,7 @@ static std::vector<ti_task_t> g_tien_tasks;
 static void remove_tien_task_by_name(const char *name) {
     if (name == NULL) return;
     auto it = std::find_if(g_tien_tasks.begin(), g_tien_tasks.end(),
-        [name](const ti_task_t &task) { return strcmp(task.name, name) == 0; });
+        [name](const tien_task_t &task) { return strcmp(task.name, name) == 0; });
     if (it == g_tien_tasks.end()) return;
     g_tien_tasks.erase(it);
 }
@@ -58,7 +58,7 @@ static void tien_log_callback(const char *fmt, va_list args) {
 static void tien_fatal_callback(void) {
     LOG_ERROR("Interpreter fatal error occurred!");
     tien_out_to_ws("[Fatal Error]: Interpreter execution halted.\n");
-    /* Remove ti_task_t from tracking list by current task name */
+    /* Remove tien_task_t from tracking list by current task name */
     remove_tien_task_by_name(pcTaskGetName(NULL));
     vTaskDelete(NULL); 
 }
@@ -89,9 +89,9 @@ static void tien_stop_cmd(const String &args) {
 
 /** @brief FreeRTOS task function to execute Tien script in background task. */
 static void interpreter_task(void *pvParameters) {
-    ti_task_t *task = (ti_task_t *)pvParameters;
+    tien_task_t *task = (tien_task_t *)pvParameters;
     if (task != NULL) {
-        if (task->source_code != NULL && task->runtime != NULL) {
+        if (task->source_code != NULL && task->handle != TI_INVALID_HANDLE) {
             /* 1. Compile source code text to AST program */
             ti_program_t *prog = ti_compile(task->source_code);
 
@@ -101,7 +101,7 @@ static void interpreter_task(void *pvParameters) {
 
             if (prog != NULL) {
                 /* 2. Execute program on dedicated runtime instance */
-                ti_execute(task->runtime, prog);
+                ti_execute(task->handle, prog);
 
                 /* 3. Free AST program allocations after execution completes or halts */
                 ti_program_free(prog);
@@ -110,8 +110,8 @@ static void interpreter_task(void *pvParameters) {
             }
 
             /* 4. Teardown runtime instance and free internal allocations */
-            ti_runtime_destroy(task->runtime);
-            task->runtime = NULL;
+            ti_destroy(task->handle);
+            task->handle = TI_INVALID_HANDLE;
         }
 
         /* 5. Remove task from active script tasks tracking list by name */
@@ -159,7 +159,7 @@ void tien_run_script(const char *name, const char *source_code) {
     }
 
     /* Create new task_t to pass to task, copy name and source code to free independently */
-    ti_task_t *task = (ti_task_t *)malloc(sizeof(ti_task_t));
+    tien_task_t *task = (tien_task_t *)malloc(sizeof(tien_task_t));
     if (task == NULL) {
         ti_log("[ERROR] Memory allocation failed for task '%s'\n", name);
         return;
@@ -176,8 +176,8 @@ void tien_run_script(const char *name, const char *source_code) {
     }
 
     /* Create new runtime instance */
-    ti_runtime_t *rt = ti_runtime_create();
-    if (rt == NULL) {
+    ti_handle_t rt = ti_create();
+    if (rt == TI_INVALID_HANDLE) {
         free(task->source_code);
         free(task);
         ti_log("[ERROR] Failed to allocate runtime for task '%s'\n", name);
@@ -185,7 +185,7 @@ void tien_run_script(const char *name, const char *source_code) {
     }
 
     /* Assign runtime to task (used for cooperative cancellation via ti_stop) */
-    task->runtime = rt;
+    task->handle = rt;
 
     /* Create new FreeRTOS task to run in background (pass NULL for handle since we use runtime to stop) */
     BaseType_t ret = xTaskCreate(interpreter_task, name, 8192, (void*)task, 1, NULL);
@@ -194,7 +194,7 @@ void tien_run_script(const char *name, const char *source_code) {
     if (ret != pdPASS) {
         LOG_ERROR("Failed to create interpreter task: " + String(name));
         ti_log("[ERROR] Failed to create FreeRTOS task '%s'\n", name);
-        ti_runtime_destroy(task->runtime);
+        ti_destroy(task->handle);
         free(task->source_code);
         free(task);
         return;
@@ -210,7 +210,7 @@ void tien_stop(const char *name) {
 
     /* Search for running script task by name in active task tracking list */
     auto it = std::find_if(g_tien_tasks.begin(), g_tien_tasks.end(),
-        [name](const ti_task_t &task) { return strcmp(task.name, name) == 0; });
+        [name](const tien_task_t &task) { return strcmp(task.name, name) == 0; });
 
     if (it == g_tien_tasks.end()) {
         ti_log("[ERROR] Task '%s' not found\n", name);
@@ -222,8 +222,8 @@ void tien_stop(const char *name) {
      * Sets runtime->is_interrupted = true, allowing the interpreter to cleanly
      * abort loops, release all held Mutexes, and safely self-terminate with vTaskDelete(NULL).
      */
-    if (it->runtime != NULL) {
-        ti_stop(it->runtime);
+    if (it->handle != TI_INVALID_HANDLE) {
+        ti_stop(it->handle);
         ti_log("[INFO] Stop requested for task '%s'\n", name);
         LOG_INFO("Stop requested for Tien task '" + String(name) + "'");
     }

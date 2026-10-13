@@ -6,7 +6,7 @@
 #include <Arduino.h>
 
 /** @brief Built-in file_read function to read entire text file from LittleFS into a string. */
-static value_t *built_in_file_read(value_t **argv, int argc) {
+static value_t *built_in_file_read(ti_handle_t handle, value_t **argv, int argc) {
     if (argc != 1 || argv == NULL || argv[0] == NULL || argv[0]->type != VAL_STRING || argv[0]->string_val == NULL) {
         ti_log("[ERROR] %s: Expect 1 string argument (file path)\n", BUILTIN_FILE_READ);
         ti_fatal();
@@ -24,7 +24,7 @@ static value_t *built_in_file_read(value_t **argv, int argc) {
 }
 
 /** @brief Built-in file_write function to overwrite content to a LittleFS file. */
-static value_t *built_in_file_write(value_t **argv, int argc) {
+static value_t *built_in_file_write(ti_handle_t handle, value_t **argv, int argc) {
     if (argc != 2 || argv == NULL || argv[0] == NULL || argv[1] == NULL ||
         argv[0]->type != VAL_STRING || argv[1]->type != VAL_STRING ||
         argv[0]->string_val == NULL || argv[1]->string_val == NULL) {
@@ -43,7 +43,7 @@ static value_t *built_in_file_write(value_t **argv, int argc) {
 }
 
 /** @brief Built-in file_exists function to check if a file exists on LittleFS. */
-static value_t *built_in_file_exists(value_t **argv, int argc) {
+static value_t *built_in_file_exists(ti_handle_t handle, value_t **argv, int argc) {
     if (argc != 1 || argv == NULL || argv[0] == NULL || argv[0]->type != VAL_STRING || argv[0]->string_val == NULL) {
         ti_log("[ERROR] %s: Expect 1 string argument (file path)\n", BUILTIN_FILE_EXISTS);
         ti_fatal();
@@ -53,7 +53,7 @@ static value_t *built_in_file_exists(value_t **argv, int argc) {
 }
 
 /** @brief Built-in file_remove function to delete a file from LittleFS. */
-static value_t *built_in_file_remove(value_t **argv, int argc) {
+static value_t *built_in_file_remove(ti_handle_t handle, value_t **argv, int argc) {
     if (argc != 1 || argv == NULL || argv[0] == NULL || argv[0]->type != VAL_STRING || argv[0]->string_val == NULL) {
         ti_log("[ERROR] %s: Expect 1 string argument (file path)\n", BUILTIN_FILE_REMOVE);
         ti_fatal();
