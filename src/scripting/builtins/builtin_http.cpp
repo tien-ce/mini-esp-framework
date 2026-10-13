@@ -7,7 +7,7 @@
 #include <ArduinoJson.h>
 
 /** @brief Built-in http_get function executing HTTP GET and returning JSON string with code and payload. */
-static value_t *built_in_http_get(value_t **argv, int argc) {
+static value_t *built_in_http_get(ti_handle_t handle, value_t **argv, int argc) {
     if (argc != 1 || argv == NULL || argv[0] == NULL || argv[0]->type != VAL_STRING || argv[0]->string_val == NULL) {
         ti_log("[ERROR] %s: Expect 1 string argument (url)\n", BUILTIN_HTTP_GET);
         ti_fatal();
@@ -45,7 +45,7 @@ static value_t *built_in_http_get(value_t **argv, int argc) {
 }
 
 /** @brief Built-in http_post function executing HTTP POST and returning JSON string with code and payload. */
-static value_t *built_in_http_post(value_t **argv, int argc) {
+static value_t *built_in_http_post(ti_handle_t handle, value_t **argv, int argc) {
     if (argc < 2 || argc > 3 || argv == NULL || argv[0] == NULL || argv[1] == NULL ||
         argv[0]->type != VAL_STRING || argv[1]->type != VAL_STRING ||
         argv[0]->string_val == NULL || argv[1]->string_val == NULL) {
@@ -92,7 +92,7 @@ static value_t *built_in_http_post(value_t **argv, int argc) {
 }
 
 /** @brief Built-in http_get function returning a dictionary (code, payload) */
-static value_t *built_in_http_get_dict(value_t **argv, int argc) {
+static value_t *built_in_http_get_dict(ti_handle_t handle, value_t **argv, int argc) {
     if (argc != 1 || argv == NULL || argv[0] == NULL || argv[0]->type != VAL_STRING || argv[0]->string_val == NULL) {
         ti_log("[ERROR] %s: Expect 1 string argument (url)\n", BUILTIN_HTTP_GET);
         ti_fatal();
@@ -131,7 +131,7 @@ static value_t *built_in_http_get_dict(value_t **argv, int argc) {
 }
 
 /** @brief Built-in http_post function returning a dictionary (code, payload) */
-static value_t *built_in_http_post_dict(value_t **argv, int argc) {
+static value_t *built_in_http_post_dict(ti_handle_t handle, value_t **argv, int argc) {
     if (argc < 2 || argc > 3 || argv == NULL || argv[0] == NULL || argv[1] == NULL ||
         argv[0]->type != VAL_STRING || argv[1]->type != VAL_STRING ||
         argv[0]->string_val == NULL || argv[1]->string_val == NULL) {

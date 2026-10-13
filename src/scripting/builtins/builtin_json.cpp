@@ -33,7 +33,7 @@ static bool parse_json_and_get_element(value_t **argv, int argc, const char *fun
 }
 
 /** @brief Built-in get_json function to extract an element from JSON string with its native type. */
-static value_t *built_in_get_json(value_t **argv, int argc) {
+static value_t *built_in_get_json(ti_handle_t handle, value_t **argv, int argc) {
     JsonDocument doc;
     JsonVariant val;
     if (!parse_json_and_get_element(argv, argc, BUILTIN_GET_JSON, doc, val)) {
@@ -66,7 +66,7 @@ static value_t *built_in_get_json(value_t **argv, int argc) {
 }
 
 /** @brief Built-in get_json_as_string function to extract an element from JSON string as a string. */
-static value_t *built_in_get_json_as_string(value_t **argv, int argc) {
+static value_t *built_in_get_json_as_string(ti_handle_t handle, value_t **argv, int argc) {
     JsonDocument doc;
     JsonVariant val;
     if (!parse_json_and_get_element(argv, argc, BUILTIN_GET_JSON_AS_STRING, doc, val)) {
@@ -88,7 +88,7 @@ static value_t *built_in_get_json_as_string(value_t **argv, int argc) {
 }
 
 /** @brief Built-in get_json_as_int function to extract an element from JSON string as an integer. */
-static value_t *built_in_get_json_as_int(value_t **argv, int argc) {
+static value_t *built_in_get_json_as_int(ti_handle_t handle, value_t **argv, int argc) {
     JsonDocument doc;
     JsonVariant val;
     if (!parse_json_and_get_element(argv, argc, BUILTIN_GET_JSON_AS_INT, doc, val)) {
@@ -99,7 +99,7 @@ static value_t *built_in_get_json_as_int(value_t **argv, int argc) {
 }
 
 /** @brief Built-in get_json_as_float function to extract an element from JSON string as a float. */
-static value_t *built_in_get_json_as_float(value_t **argv, int argc) {
+static value_t *built_in_get_json_as_float(ti_handle_t handle, value_t **argv, int argc) {
     JsonDocument doc;
     JsonVariant val;
     if (!parse_json_and_get_element(argv, argc, BUILTIN_GET_JSON_AS_FLOAT, doc, val)) {
@@ -110,7 +110,7 @@ static value_t *built_in_get_json_as_float(value_t **argv, int argc) {
 }
 
 /** @brief Built-in get_json_as_bool function to extract an element from JSON string as a boolean. */
-static value_t *built_in_get_json_as_bool(value_t **argv, int argc) {
+static value_t *built_in_get_json_as_bool(ti_handle_t handle, value_t **argv, int argc) {
     JsonDocument doc;
     JsonVariant val;
     if (!parse_json_and_get_element(argv, argc, BUILTIN_GET_JSON_AS_BOOL, doc, val)) {

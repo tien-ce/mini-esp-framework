@@ -10,7 +10,7 @@
  * @brief Write data to NVS with polymorphism support
  * Supported types: int, float, bool, string
  */
-static value_t *built_in_nvs_write(value_t **argv, int argc) {
+static value_t *built_in_nvs_write(ti_handle_t handle, value_t **argv, int argc) {
     if (argc != 2 || argv == NULL || argv[0] == NULL || argv[1] == NULL || argv[0]->type != VAL_STRING) {
         ti_log("[ERROR] nvs_write: Expect (string key, value)\n");
         ti_fatal();
@@ -55,7 +55,7 @@ static value_t *built_in_nvs_write(value_t **argv, int argc) {
  * @brief Read data from NVS with polymorphism.
  * Return type is automatically inferred based on default_value type.
  */
-static value_t *built_in_nvs_read(value_t **argv, int argc) {
+static value_t *built_in_nvs_read(ti_handle_t handle, value_t **argv, int argc) {
     if (argc != 2 || argv == NULL || argv[0] == NULL || argv[1] == NULL || argv[0]->type != VAL_STRING) {
         ti_log("[ERROR] nvs_read: Expect (string key, default_value)\n");
         ti_fatal();

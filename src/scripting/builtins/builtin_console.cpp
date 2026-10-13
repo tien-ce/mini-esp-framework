@@ -5,7 +5,7 @@
 #include <Arduino.h>
 
 /** @brief Built-in print function callback registered into TienInterpreter engine. */
-static value_t *built_in_print(value_t **argv, int argc) {
+static value_t *built_in_print(ti_handle_t handle, value_t **argv, int argc) {
     if (argc == 0) {
         LOG_INFO("");
         return val_new_null();
