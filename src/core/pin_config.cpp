@@ -17,24 +17,25 @@ void pin_config_init(void) {
         g_pin_names[i] = "";
     }
 
-    core_nvs_register_namespace("pin_cfg");
+    // core_nvs_register_namespace() returns true on success; warn on failure but still try to load
+    if(!core_nvs_register_namespace("pin_cfg"))
+    {
+        LOG_WARNING("Pin config can't register namespace with NVS");
+    }
 
     bool has_saved_config = false;
-    {
-        for (int i = 0; i < MAX_GPIO_PINS; i++) {
-            String key = "gpio" + String(i);
-            if (core_nvs_has_key("pin_cfg", key)) {
-                g_pin_names[i] = core_nvs_read_string("pin_cfg", key, "");
-                if (g_pin_names[i].length() > 0) {
-                    has_saved_config = true;
-                }
+    for (int i = 0; i < MAX_GPIO_PINS; i++) {
+        String key = "gpio" + String(i);
+        if (core_nvs_has_key("pin_cfg", key)) {
+            g_pin_names[i] = core_nvs_read_string("pin_cfg", key, "");
+            if (g_pin_names[i].length() > 0) {
+                has_saved_config = true;
             }
         }
-        /* lock released */
     }
 
     if (!has_saved_config) {
-        LOG_INFO("Pin config missing in NVS. Populating default pin mappings.");
+        LOG_WARNING("Pin config missing in NVS. Populating default pin mappings.");
         
         // 1. Iterate through predefined board pin definitions and assign non-None defaults to RAM table
         for (size_t i = 0; i < BOARD_PIN_COUNT; i++) {
@@ -53,12 +54,9 @@ void pin_config_init(void) {
 }
 
 void pin_config_save(void) {
-    {
-        for (int i = 0; i < MAX_GPIO_PINS; i++) {
-            String key = "gpio" + String(i);
-            core_nvs_save_string("pin_cfg", key, g_pin_names[i]);
-        }
-        /* lock released */
+    for (int i = 0; i < MAX_GPIO_PINS; i++) {
+        String key = "gpio" + String(i);
+        core_nvs_save_string("pin_cfg", key, g_pin_names[i]);
     }
 }
 

@@ -571,7 +571,16 @@ void vWifiTask(void *pvParameters) {
                 previousWifiMillis = currentMillis;
             }
         }
-        vTaskDelay(pdMS_TO_TICKS(5000));
+        else if (CoreState_GetNetwork() != NET_STATE_WIFI_STA) {
+            // Link came back after the 500 ms check above (or by the driver's own auto-reconnect):
+            // resynchronize the shared network state, otherwise it stays DISCONNECTED/CONNECTING forever
+            if (WiFi.localIP() != IPAddress(0, 0, 0, 0)) {
+                CoreState_SetNetwork(NET_STATE_WIFI_STA);
+                dispatch_signal(SIG_WIFI_CONNECTED);
+                LOG_INFO("WiFi link restored. IP: " + WiFi.localIP().toString());
+            }
+        }
+        vTaskDelay(pdMS_TO_TICKS(1000));
     }
 }
 
