@@ -19,56 +19,270 @@ static String tableRowsHTML = "";
 static JsonDocument telemetryDoc;
 static String telemetryJson = "{}";
 
+/** Longest placeholder name (without the surrounding '%') the scanner will look for. */
+#define TPL_MAX_TOKEN_LEN 20
+
+/** Placeholder identifiers, in the same order as TPL_TOKENS. */
+enum TplToken : uint8_t {
+    TK_HEADER_TITLE,
+    TK_HEADER_SUBTITLE,
+    TK_FOOTER_TEXT,
+    TK_APP_VERSION,
+    TK_BUILD_DATE,
+    TK_SDK_VERSION,
+    TK_HOSTNAME,
+    TK_CHIP_MODEL,
+    TK_MAC_ADDR,
+    TK_FLASH_SIZE,
+    TK_SENSOR_TABLE_ROWS,
+    TK_UPTIME,
+    TK_IP_ADDR,
+    TK_GATEWAY,
+    TK_SUBNET_MASK,
+    TK_DNS_SERVER,
+    TK_FREE_RAM,
+    TK_WIFI_SSID,
+    TK_WIFI_CLIENT_ID,
+    TK_STATIC_IP,
+    TK_STATIC_GATEWAY,
+    TK_STATIC_SUBNET,
+    TK_STATIC_DNS1,
+    TK_MQTT_SERVER,
+    TK_MQTT_PORT,
+    TK_MQTT_USER,
+    TK_MQTT_TOPIC,
+    TK_MQTT_RPC_TOPIC,
+    TK_MQTT_INTERVAL,
+    TK_COUNT
+};
+
+/** Placeholder names (without '%'), indexed by TplToken. */
+static const char *const TPL_TOKENS[TK_COUNT] = {
+    "HEADER_TITLE", "HEADER_SUBTITLE", "FOOTER_TEXT", "APP_VERSION", "BUILD_DATE",
+    "SDK_VERSION", "HOSTNAME", "CHIP_MODEL", "MAC_ADDR", "FLASH_SIZE",
+    "SENSOR_TABLE_ROWS", "UPTIME", "IP_ADDR", "GATEWAY", "SUBNET_MASK",
+    "DNS_SERVER", "FREE_RAM", "WIFI_SSID", "WIFI_CLIENT_ID",
+    "STATIC_IP", "STATIC_GATEWAY", "STATIC_SUBNET", "STATIC_DNS1", "MQTT_SERVER",
+    "MQTT_PORT", "MQTT_USER", "MQTT_TOPIC", "MQTT_RPC_TOPIC",
+    "MQTT_INTERVAL",
+};
+
+/**
+ * Bounded output sink used by both passes.
+ * buf == nullptr -> counting pass (only len grows); buf != nullptr -> emit pass (copy, never past cap).
+ */
+struct TplWriter {
+    char  *buf;
+    size_t cap;
+    size_t len;
+};
+
+/**
+ * Values that can change between the counting pass and the emit pass are sampled once here,
+ * so both passes see identical text and the measured size stays exact.
+ */
+struct TplSnapshot {
+    char uptime[24];
+    char freeRam[20];
+    char flashSize[20];
+    char ip[16];
+    char gateway[16];
+    char subnet[16];
+    char dns[16];
+    char mqttPort[8];
+    char mqttInterval[12];
+};
+
 /* -------------------------------------------------------------------------- */
 /*                              STATIC FUNCTIONS                              */
 /* -------------------------------------------------------------------------- */
 
-/** @brief Formats elapsed seconds into uptime string format (e.g. "0T00:01:23"). */
-static String formatUptime(uint32_t seconds) {
+/**
+ * @brief Appends n bytes to the writer (count-only when no buffer, truncating at cap otherwise).
+ * @param w Output writer.
+ * @param s Source bytes.
+ * @param n Number of bytes to append.
+ */
+static inline void tplEmitN(TplWriter &w, const char *s, size_t n) {
+    // Copy only when a buffer is attached, and never beyond its capacity
+    if (w.buf && w.len < w.cap) {
+        size_t room = w.cap - w.len;
+        memcpy(w.buf + w.len, s, n < room ? n : room);
+    }
+    // Always advance the logical length so the counting pass gets the exact total
+    w.len += n;
+}
+
+/**
+ * @brief Appends a NUL-terminated string to the writer.
+ * @param w Output writer.
+ * @param s Source string (nullptr is treated as empty).
+ */
+static inline void tplEmit(TplWriter &w, const char *s) {
+    if (s) tplEmitN(w, s, strlen(s));
+}
+
+/**
+ * @brief Appends an Arduino String to the writer.
+ * @param w Output writer.
+ * @param s Source string.
+ */
+static inline void tplEmit(TplWriter &w, const String &s) {
+    tplEmitN(w, s.c_str(), s.length());
+}
+
+/**
+ * @brief Appends a decimal integer to the writer.
+ * @param w Output writer.
+ * @param v Value to print.
+ */
+static inline void tplEmitInt(TplWriter &w, int v) {
+    char tmp[16];
+    int n = snprintf(tmp, sizeof(tmp), "%d", v);
+    if (n > 0) tplEmitN(w, tmp, (size_t)n);
+}
+
+/**
+ * @brief Formats an IPv4 address as dotted text into a fixed buffer.
+ * @param out Destination buffer.
+ * @param cap Destination capacity.
+ * @param ip Address to format.
+ */
+static void tplFormatIp(char *out, size_t cap, const IPAddress &ip) {
+    snprintf(out, cap, "%u.%u.%u.%u", ip[0], ip[1], ip[2], ip[3]);
+}
+
+/**
+ * @brief Samples all fast-changing values(can change between 2 pharse (get length and copy value) once per render.
+ * @param s Snapshot to fill.
+ */
+static void tplTakeSnapshot(TplSnapshot &s) {
+    // Uptime as "<days>T<hh>:<mm>:<ss>"
+    uint32_t seconds = millis() / 1000;
     uint32_t days = seconds / 86400;
     seconds %= 86400;
     uint32_t hrs = seconds / 3600;
     seconds %= 3600;
-    uint32_t mins = seconds / 60;
-    uint32_t secs = seconds % 60;
-    char buf[32];
-    snprintf(buf, sizeof(buf), "%uT%02u:%02u:%02u", days, hrs, mins, secs);
-    return String(buf);
+    snprintf(s.uptime, sizeof(s.uptime), "%uT%02u:%02u:%02u",
+             (unsigned)days, (unsigned)hrs, (unsigned)(seconds / 60), (unsigned)(seconds % 60));
+
+    // Memory and flash figures
+    snprintf(s.freeRam, sizeof(s.freeRam), "%.1f KB", esp_info_get_free_heap() / 1024.0);
+    snprintf(s.flashSize, sizeof(s.flashSize), "%u KB", (unsigned)(ESP.getFlashChipSize() / 1024));
+
+    // Network addresses (no String temporaries)
+    tplFormatIp(s.ip, sizeof(s.ip), WiFi.localIP());
+    tplFormatIp(s.gateway, sizeof(s.gateway), WiFi.gatewayIP());
+    tplFormatIp(s.subnet, sizeof(s.subnet), WiFi.subnetMask());
+    tplFormatIp(s.dns, sizeof(s.dns), WiFi.dnsIP());
+
+    // MQTT numeric settings
+    snprintf(s.mqttPort, sizeof(s.mqttPort), "%u", (unsigned)getMqttPort());
+    snprintf(s.mqttInterval, sizeof(s.mqttInterval), "%u", (unsigned)getMqttInterval());
 }
 
-/** @brief Generates dynamic GPIO selector rows from BOARD_PINS and AVAILABLE_PIN_OPTIONS. */
-static String generatePinRows() {
-    String rows = "";
-    for (size_t i = 0; i < BOARD_PIN_COUNT; i++) {
-        const auto& pin = BOARD_PINS[i];
-        String activeName = get_pin_name(pin.gpio);
-        if (activeName.length() == 0) {
-            activeName = pin.defaultOption;
-        }
-
-        if (pin.isFixed) {
-            rows += "<div class='form-row'>";
-            rows += "<label for='gpio" + String(pin.gpio) + "' class='gpio-red'>" + pin.label + "</label>";
-            rows += "<select id='gpio" + String(pin.gpio) + "' name='gpio" + String(pin.gpio) + "' disabled>";
-            rows += "<option value='-1' selected>" + String(pin.defaultOption) + "</option>";
-            rows += "</select></div>";
+/**
+ * @brief Emits the value of one placeholder into the writer.
+ * @param w Output writer.
+ * @param tk Placeholder identifier.
+ * @param snap Per-render snapshot of volatile values.
+ */
+static void tplEmitToken(TplWriter &w, TplToken tk, const TplSnapshot &snap) {
+    // Dispatch on the placeholder id; each branch writes its value directly into the writer
+    switch (tk) {
+    case TK_HEADER_TITLE:    tplEmit(w, "ESP32S3"); break;
+    case TK_HEADER_SUBTITLE: tplEmit(w, "ESP mini framework " FIRMWARE_VERSION); break;
+    case TK_FOOTER_TEXT:     tplEmit(w, "ESP mini framework " FIRMWARE_VERSION " by Văn Tiến"); break;
+    case TK_APP_VERSION:     tplEmit(w, FIRMWARE_VERSION); break;
+    case TK_BUILD_DATE:      tplEmit(w, __DATE__ " " __TIME__); break;
+    case TK_SDK_VERSION:     tplEmit(w, ESP.getSdkVersion()); break;
+    case TK_HOSTNAME: {
+        // Prefer the configured client id, fall back to "esp-mini-framework"
+        String clientID = getWifiClientID();
+        if (clientID.length() > 0) {
+            tplEmit(w, clientID);
         } else {
-            rows += "<div class='form-row'>";
-            rows += "<label for='gpio" + String(pin.gpio) + "'>" + pin.label + "</label>";
-            rows += "<select id='gpio" + String(pin.gpio) + "' name='gpio" + String(pin.gpio) + "'>";
+            tplEmit(w, "esp-mini-framework-");
+            tplEmit(w, esp_info_get_mac_str());
+        }
+        break;
+    }
+    case TK_CHIP_MODEL:        tplEmit(w, esp_info_get_model()); break;
+    case TK_MAC_ADDR:          tplEmit(w, esp_info_get_mac_str()); break;
+    case TK_FLASH_SIZE:        tplEmit(w, snap.flashSize); break;
+    case TK_SENSOR_TABLE_ROWS: tplEmit(w, tableRowsHTML); break;
+    case TK_UPTIME:            tplEmit(w, snap.uptime); break;
+    case TK_IP_ADDR:           tplEmit(w, snap.ip); break;
+    case TK_GATEWAY:           tplEmit(w, snap.gateway); break;
+    case TK_SUBNET_MASK:       tplEmit(w, snap.subnet); break;
+    case TK_DNS_SERVER:        tplEmit(w, snap.dns); break;
+    case TK_FREE_RAM:          tplEmit(w, snap.freeRam); break;
+    case TK_WIFI_SSID:         tplEmit(w, getWifiSSID()); break;
+    case TK_WIFI_CLIENT_ID:    tplEmit(w, getWifiClientID()); break;
+    case TK_STATIC_IP:         tplEmit(w, getWifiIP()); break;
+    case TK_STATIC_GATEWAY:    tplEmit(w, getWifiGateway()); break;
+    case TK_STATIC_SUBNET:     tplEmit(w, getWifiSubnet()); break;
+    case TK_STATIC_DNS1:       tplEmit(w, getWifiDNS1()); break;
+    case TK_MQTT_SERVER:       tplEmit(w, getMqttServer()); break;
+    case TK_MQTT_PORT:         tplEmit(w, snap.mqttPort); break;
+    case TK_MQTT_USER:         tplEmit(w, getMqttUser()); break;
+    case TK_MQTT_TOPIC:        tplEmit(w, getMqttDataTopic()); break;
+    case TK_MQTT_RPC_TOPIC:    tplEmit(w, getMqttRpcTopic()); break;
+    case TK_MQTT_INTERVAL:     tplEmit(w, snap.mqttInterval); break;
+    default: break;
+    }
+}
 
-            for (size_t j = 0; j < AVAILABLE_PIN_OPTIONS_COUNT; j++) {
-                const char* optName = AVAILABLE_PIN_OPTIONS[j];
-                bool isSelected = activeName.equalsIgnoreCase(optName);
-                String selectedAttr = isSelected ? " selected" : "";
-
-                rows += "<option value='" + String(optName) + "'" + selectedAttr + ">" + String(optName) + "</option>";
-            }
-
-            rows += "</select></div>";
+/**
+ * @brief Looks up a placeholder name in TPL_TOKENS.
+ * @param name Start of the name (not NUL-terminated).
+ * @param len Length of the name.
+ * @param out Receives the token id when found.
+ * @return true when the name is a known placeholder.
+ */
+static bool tplFindToken(const char *name, size_t len, TplToken &out) {
+    // Compare length first, then bytes, over the small fixed table
+    for (uint8_t i = 0; i < TK_COUNT; i++) {
+        if (strlen(TPL_TOKENS[i]) == len && memcmp(TPL_TOKENS[i], name, len) == 0) {
+            out = (TplToken)i;
+            return true;
         }
     }
-    return rows;
+    return false;
+}
+
+/**
+ * @brief Runs one pass over the template, copying literal text and expanding placeholders.
+ * @param w Output writer (counting or emitting).
+ * @param tpl NUL-terminated template.
+ * @param snap Per-render snapshot of volatile values.
+ */
+static void tplScan(TplWriter &w, const char *tpl, const TplSnapshot &snap) {
+    const char *p = tpl;
+    const char *litStart = tpl;   // start of the pending literal run
+
+    // Single walk over the template; only '%' can start a placeholder
+    while (*p) {
+        if (*p != '%') { p++; continue; }
+
+        // Find the closing '%' within the maximum token length
+        const char *q = p + 1;
+        while (*q && *q != '%' && (size_t)(q - p - 1) <= TPL_MAX_TOKEN_LEN) q++;
+
+        // Expand only when the text between the '%' pair is a known name
+        TplToken tk;
+        if (*q == '%' && tplFindToken(p + 1, (size_t)(q - p - 1), tk)) {
+            tplEmitN(w, litStart, (size_t)(p - litStart));   // flush literal before the token
+            tplEmitToken(w, tk, snap);                       // write the resolved value
+            p = q + 1;                                       // continue after the closing '%'
+            litStart = p;
+        } else {
+            p++;                                             // lone/unknown '%': keep as literal
+        }
+    }
+
+    // Flush the trailing literal run
+    tplEmitN(w, litStart, (size_t)(p - litStart));
 }
 
 /* -------------------------------------------------------------------------- */
@@ -76,46 +290,90 @@ static String generatePinRows() {
 /* -------------------------------------------------------------------------- */
 
 String web_render_template(const char* templateStr) {
-    String page = String(templateStr);
-    page.replace("%HEADER_TITLE%", "ESP32S3");
-    page.replace("%HEADER_SUBTITLE%", "ESP mini framework " + String(FIRMWARE_VERSION));
-    page.replace("%FOOTER_TEXT%", "ESP mini framework " + String(FIRMWARE_VERSION) + " by Văn Tiến");
-    page.replace("%APP_VERSION%", String(FIRMWARE_VERSION));
-    page.replace("%BUILD_DATE%", String(__DATE__) + " " + String(__TIME__));
-    page.replace("%SDK_VERSION%", String(ESP.getSdkVersion()));
-    String clientID = getWifiClientID();
-    page.replace("%HOSTNAME%", clientID.length() > 0 ? clientID : ("tasmota-" + String(esp_info_get_mac_str())));
-    page.replace("%CHIP_MODEL%", String(esp_info_get_model()));
-    page.replace("%MAC_ADDR%", String(esp_info_get_mac_str()));
-    page.replace("%FLASH_SIZE%", String(ESP.getFlashChipSize() / 1024) + " KB");
-    page.replace("%SENSOR_TABLE_ROWS%", tableRowsHTML);
-    page.replace("%GPIO_TABLE_ROWS%", generatePinRows());
-    page.replace("%UPTIME%", formatUptime(millis() / 1000));
-    page.replace("%IP_ADDR%", WiFi.localIP().toString());
-    page.replace("%GATEWAY%", WiFi.gatewayIP().toString());
-    page.replace("%SUBNET_MASK%", WiFi.subnetMask().toString());
-    page.replace("%DNS_SERVER%", WiFi.dnsIP().toString());
-    page.replace("%FREE_RAM%", String(esp_info_get_free_heap() / 1024.0, 1) + " KB");
+    // Checking input
+    if (templateStr == nullptr) return String();
 
-    // WiFi placeholders
-    page.replace("%WIFI_SSID%", getWifiSSID());
-    page.replace("%WIFI_PASSWORD%", getWifiPassword());
-    page.replace("%WIFI_CLIENT_ID%", getWifiClientID());
-    page.replace("%STATIC_IP%", getWifiIP());
-    page.replace("%STATIC_GATEWAY%", getWifiGateway());
-    page.replace("%STATIC_SUBNET%", getWifiSubnet());
-    page.replace("%STATIC_DNS1%", getWifiDNS1());
+    // Sample volatile values once so both passes agree
+    TplSnapshot snap;
+    tplTakeSnapshot(snap);
 
-    // MQTT placeholders
-    page.replace("%MQTT_SERVER%", getMqttServer());
-    page.replace("%MQTT_PORT%", String(getMqttPort()));
-    page.replace("%MQTT_USER%", getMqttUser());
-    page.replace("%MQTT_PASSWORD%", getMqttPass());
-    page.replace("%MQTT_TOPIC%", getMqttDataTopic());
-    page.replace("%MQTT_RPC_TOPIC%", getMqttRpcTopic());
-    page.replace("%MQTT_INTERVAL%", String(getMqttInterval()));
+    // Pass 1: count the exact output size
+    TplWriter counter = {nullptr, 0, 0};
+    tplScan(counter, templateStr, snap);
 
+    // Single allocation for the whole page
+    char *out = (char *)malloc(counter.len + 1);
+    if (out == nullptr) {
+        LOG_ERROR_STR("web_render_template: out of memory (%u bytes)", (unsigned)(counter.len + 1));
+        return String();
+    }
+
+    // Pass 2: emit into the buffer (bounded, cannot overflow even if a getter changed meanwhile)
+    TplWriter emitter = {out, counter.len, 0};
+    tplScan(emitter, templateStr, snap);
+    out[emitter.len < counter.len ? emitter.len : counter.len] = '\0';
+
+    // Hand the page to the caller as a String (one copy) and release the work buffer
+    String page(out);
+    free(out);
     return page;
+}
+/*
+ * --------------------------------------------------------------------------
+ * JSON Payload Schema generated by web_build_gpio_json()
+ * --------------------------------------------------------------------------
+ *
+ * Root: JsonObject {}
+ * │
+ * ├── "options" : JsonArray [string, ...]
+ * │     Shared list of all selectable pin functions (sent once for all pins).
+ * │     Example: ["None", "Relay1", "Relay2", "Input1", "RS485_TX"]
+ * │
+ * └── "pins"    : JsonArray [JsonObject {}, ...]
+ *       List of physical board pin configurations.
+ *       Each item contains:
+ *       ├── "gpio"  : (int)     GPIO pin number (e.g., 0, 6, 17)
+ *       ├── "label" : (string)  Display text for the pin (e.g., "GPIO6")
+ *       ├── "fixed" : (bool)   true: Hardware-fixed pin (disabled in UI)
+ *       │                      false: Configurable pin (enabled dropdown)
+ *       └── "value" : (string)  Active assigned function name
+ *
+ * --------------------------------------------------------------------------
+ * Output Example:
+ * --------------------------------------------------------------------------
+ * {
+ *   "options": ["None", "Relay1", "Relay2", "Input1"],
+ *   "pins": [
+ *     {"gpio": 6, "label": "GPIO6", "fixed": false, "value": "Relay1"},
+ *     {"gpio": 9, "label": "GPIO9", "fixed": true,  "value": "SPI Flash"}
+ *   ]
+ * }
+ * --------------------------------------------------------------------------
+     */
+void web_build_gpio_json(Print &out) {
+    // Build a small document: shared option list once, then one entry per board pin
+    JsonDocument doc;
+
+    // Option names are shared by every selectable pin
+    JsonArray options = doc["options"].to<JsonArray>();
+    for (size_t i = 0; i < AVAILABLE_PIN_OPTIONS_COUNT; i++) {
+        options.add(AVAILABLE_PIN_OPTIONS[i]);
+    }
+
+    // One entry per physical pin: current selection falls back to the board default
+    JsonArray pins = doc["pins"].to<JsonArray>();
+    for (size_t i = 0; i < BOARD_PIN_COUNT; i++) {
+        const auto &pin = BOARD_PINS[i];
+        String active = get_pin_name(pin.gpio);
+        JsonObject o = pins.add<JsonObject>();
+        o["gpio"] = pin.gpio;
+        o["label"] = pin.label;
+        o["fixed"] = pin.isFixed;
+        o["value"] = (active.length() > 0 && !pin.isFixed) ? active.c_str() : pin.defaultOption;
+    }
+
+    // Stream straight to the caller (response stream), no intermediate String
+    serializeJson(doc, out);
 }
 
 /* This function called from drives want to update these value into the web */
