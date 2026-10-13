@@ -6,6 +6,7 @@
 #include "TienInterpreter.h"
 #include <Arduino.h>
 #include <unordered_map>
+#include <ArduinoJson.h>
 
 /* -------------------------------------------------------------------------- */
 /*                             DEFINES & CONSTANTS                            */
@@ -41,12 +42,70 @@ struct StringHash {
 // Local Command Queue Handle
 static QueueHandle_t commandQueue = NULL;
 
-// Command registry map storing command name and handler function pointer
-static std::unordered_map<String, CommandHandlerFunc, StringHash> commandMap;
+/** @brief Registry entry: handler, descriptive metadata and whether this name is only an alias. */
+struct CmdEntry {
+    CommandHandlerFunc handler;
+    CmdMeta            meta;
+    bool               isAlias;
+};
+
+// Command registry map storing command name and its entry (primary commands and aliases)
+static std::unordered_map<String, CmdEntry, StringHash> commandMap;
 
 /* -------------------------------------------------------------------------- */
 /*                              STATIC FUNCTIONS                              */
 /* -------------------------------------------------------------------------- */
+
+/**
+ * @brief Returns the mutex guarding commandMap (created on first use, thread-safe static init).
+ * @return Mutex handle, or NULL if it could not be created.
+ */
+static SemaphoreHandle_t cmdMapMutex() {
+    static SemaphoreHandle_t mtx = xSemaphoreCreateMutex();
+    return mtx;
+}
+
+/**
+ * @brief Copies the handler of a command out of the map under the lock.
+ * @param name Upper-case command name or alias.
+ * @param handler Receives the handler when found.
+ * @return true when the command exists.
+ */
+static bool cmdFindHandler(const String &name, CommandHandlerFunc &handler) {
+    // Lock the map only for the lookup so the handler itself runs without the lock
+    bool found = false;
+    SemaphoreHandle_t mtx = cmdMapMutex();
+    if (mtx && xSemaphoreTake(mtx, pdMS_TO_TICKS(100)) == pdTRUE) {
+        auto it = commandMap.find(name);
+        if (it != commandMap.end()) {
+            handler = it->second.handler;
+            found = true;
+        }
+        xSemaphoreGive(mtx);
+    }
+    return found;
+}
+
+/**
+ * @brief Splits a comma-separated list and calls fn(token) for every non-empty trimmed token.
+ * @param list Comma-separated text (may be nullptr or empty).
+ * @param fn Callback receiving each trimmed token.
+ */
+template <typename Fn>
+static void forEachCsv(const char *list, Fn fn) {
+    // Walk the list token by token
+    if (list == nullptr) return;
+    String s(list);
+    int start = 0;
+    while (start <= (int)s.length()) {
+        int comma = s.indexOf(',', start);
+        String token = (comma < 0) ? s.substring(start) : s.substring(start, comma);
+        token.trim();
+        if (token.length() > 0) fn(token);
+        if (comma < 0) break;
+        start = comma + 1;
+    }
+}
 
 
 /** @brief Command handler: Restarts system. */
@@ -226,10 +285,10 @@ static void execute_cmd(const String &raw_cmd) {
     /*
      * NHÁNH 5: TRA CỨU BẢNG BĂM VÀ THỰC THI CALLBACK (Execution Dispatching)
      */
-    auto it = commandMap.find(name);
-    if (it != commandMap.end()) {
+    CommandHandlerFunc handler = nullptr;
+    if (cmdFindHandler(name, handler) && handler != nullptr) {
         LOG_DEBUG("Executing handler for: " + name);
-        it->second(arg);
+        handler(arg);
     } else {
         LOG_WARNING("Command not found: " + name);
     }
@@ -381,27 +440,84 @@ static void setSerialLogReady() {
 
 
 /**
- * @brief Registers a command string and its handler function into the command map.
+ * @brief Registers a command (and its aliases from meta.aliases) into the command map.
  * @param name The command identifier name string.
  * @param handler Function pointer callback to execute when the command is received.
+ * @param meta Optional description data and comma-separated alias list.
  * @return true if successfully registered, false if command already exists.
  */
-bool register_cmd(const String &name, CommandHandlerFunc handler) {
+bool register_cmd(const String &name, CommandHandlerFunc handler, const CmdMeta &meta) {
+    // Normalize the primary name
     String cleanName = name;
     cleanName.trim();
     cleanName.toUpperCase();
 
     LOG_DEBUG("Register cmd " + cleanName);
 
+    // Take the map lock for the whole registration (primary + aliases stay consistent)
+    SemaphoreHandle_t mtx = cmdMapMutex();
+    if (mtx == NULL || xSemaphoreTake(mtx, pdMS_TO_TICKS(100)) != pdTRUE) {
+        LOG_WARNING("Can't register cmd: " + cleanName + ", registry busy");
+        return false;
+    }
+
     // Check if command already exists
     if (commandMap.find(cleanName) != commandMap.end()) {
+        xSemaphoreGive(mtx);
         LOG_WARNING("Can't register cmd: " + cleanName + ", already existed");
         return false;
     }
 
-    commandMap[cleanName] = handler;
+    // Insert the primary command
+    commandMap[cleanName] = CmdEntry{handler, meta, false};
+
+    // Insert every alias pointing to the same handler; a clashing alias is skipped, not fatal
+    forEachCsv(meta.aliases, [&](String &alias) {
+        alias.toUpperCase();
+        if (commandMap.find(alias) != commandMap.end()) {
+            LOG_WARNING("Skip alias " + alias + " of " + cleanName + ", already existed");
+            return;
+        }
+        commandMap[alias] = CmdEntry{handler, meta, true};
+    });
+
+    xSemaphoreGive(mtx);
     LOG_INFO("Register success cmd: " + cleanName);
     return true;
+}
+
+void cmd_list_json(Print &out) {
+    // Build the document under the lock (copies the strings), serialize after releasing it
+    JsonDocument doc;
+    JsonArray list = doc["commands"].to<JsonArray>();
+
+    SemaphoreHandle_t mtx = cmdMapMutex();
+    if (mtx && xSemaphoreTake(mtx, pdMS_TO_TICKS(100)) == pdTRUE) {
+        // Export primary commands only; aliases are listed inside their primary entry
+        for (const auto &kv : commandMap) {
+            if (kv.second.isAlias) continue;
+            const CmdMeta &m = kv.second.meta;
+
+            JsonObject o = list.add<JsonObject>();
+            o["name"] = kv.first;
+            o["info"] = m.info;
+            o["usage"] = m.usage;
+
+            // "alias": [...] is always present, empty when the command has none
+            JsonArray aliasArr = o["alias"].to<JsonArray>();
+            forEachCsv(m.aliases, [&](String &a) { a.toUpperCase(); aliasArr.add(a); });
+
+            // Optional fields are emitted only when set
+            if (m.args != nullptr && m.args[0] != '\0') {
+                JsonArray argArr = o["args"].to<JsonArray>();
+                forEachCsv(m.args, [&](String &a) { argArr.add(a); });
+            }
+            if (m.files) o["files"] = true;
+        }
+        xSemaphoreGive(mtx);
+    }
+
+    serializeJson(doc, out);
 }
 
 /**
@@ -437,11 +553,16 @@ void vLogTask(void *pvParameters) {
     loadLogConfig();
     setSerialLogReady();
     LOG_INFO("Init log task done. Current level: " + levelToStr(core_log_get_level())); 
-    register_cmd(CMD_SET_LOG_LEVEL, setLogLevel);
-    register_cmd(CMD_GET_LOG_LEVEL, getLogLevel);
-    register_cmd(CMD_LIST_LOG_LEVEL, listLogLevel);
-    register_cmd(CMD_RESTART, esp32_restart);
-    register_cmd(CMD_BACKLOG, backlogHandler);
+    register_cmd(CMD_SET_LOG_LEVEL, setLogLevel,
+                 CmdMeta{"Set the log level", "CMD_SET_LEVEL: <level>", "DEBUG,INFO,WARNING,ERROR"});
+    register_cmd(CMD_GET_LOG_LEVEL, getLogLevel,
+                 CmdMeta{"Show the current log level", "CMD_GET_LEVEL"});
+    register_cmd(CMD_LIST_LOG_LEVEL, listLogLevel,
+                 CmdMeta{"List the accepted log level values", "CMD_LIST_LEVEL"});
+    register_cmd(CMD_RESTART, esp32_restart,
+                 CmdMeta{"Restart the device", "ESP32_RESTART"});
+    register_cmd(CMD_BACKLOG, backlogHandler,
+                 CmdMeta{"Run several commands in order", "BACKLOG: <cmd1>; <cmd2>"});
     LOG_INFO("vLogTask started, sleeping until command arrives...");
     for (;;) {
 #if !(defined(ARDUINO_USB_CDC_ON_BOOT) && (ARDUINO_USB_CDC_ON_BOOT > 0))
