@@ -20,6 +20,18 @@
 typedef void (*CommandHandlerFunc)(const String &args);
 
 /**
+ * @brief Optional descriptive metadata of a command (used by GET /api/commands).
+ * @note All members are optional; string members must point to static storage (e.g. literals).
+ */
+struct CmdMeta {
+    const char* info    = "";     /**< Short description, e.g. "Set the log level". */
+    const char* usage   = "";     /**< Usage line, e.g. "CMD_SET_LEVEL: <level>". */
+    const char* args    = "";     /**< Comma-separated suggested arguments, e.g. "DEBUG,INFO". */
+    const char* aliases = "";     /**< Comma-separated alias names, e.g. "WIFI_SSID,SSID_NAME". */
+    bool        files   = false;  /**< true when the argument is a script path on LittleFS. */
+};
+
+/**
  * @brief Command packet structure passed via FreeRTOS queue.
  */
 struct CommandPacket {
@@ -36,8 +48,20 @@ void log_task_init(void);
 /** @brief FreeRTOS task for log and command processing. */
 void vLogTask(void *pvParameters);
 
-/** @brief Registers command string and handler callback. */
-bool register_cmd(const String &name, CommandHandlerFunc handler);
+/**
+ * @brief Registers a command and, automatically, every alias listed in meta.aliases.
+ * @param name Primary command name (case-insensitive, stored upper-case).
+ * @param handler Callback executed when the command (or any of its aliases) is received.
+ * @param meta Optional description data; defaults keep old call sites valid.
+ * @return true if the primary command was registered, false if the name already exists.
+ */
+bool register_cmd(const String &name, CommandHandlerFunc handler, const CmdMeta &meta = CmdMeta());
+
+/**
+ * @brief Writes the list of registered primary commands as JSON ({"commands":[...]}).
+ * @param out Destination stream, typically an AsyncResponseStream.
+ */
+void cmd_list_json(Print &out);
 
 /** @brief Enables Web WebSocket log output. */
 void setWebLogReady();

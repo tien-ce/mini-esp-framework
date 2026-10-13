@@ -123,6 +123,85 @@ static void handleTelemetry(AsyncWebServerRequest *request) {
     web_clear_telemetry_json();
 }
 
+/** @brief Handles HTTP GET request for the GPIO pin mapping as JSON ("/api/gpio"). */
+static void handleGpio(AsyncWebServerRequest *request) {
+    // Checking authentication
+    if (!web_authenticate(request)) return;
+
+    // Create a stream response and fill it directly (no intermediate String)
+    AsyncResponseStream *response = request->beginResponseStream("application/json");
+    if (response == nullptr) {
+        request->send(500, "text/plain", "Out of memory");
+        return;
+    }
+    web_build_gpio_json(*response);
+    request->send(response);
+}
+
+/** @brief Handles HTTP GET request for the registered console command list ("/api/commands"). */
+static void handleCommands(AsyncWebServerRequest *request) {
+    // Checking authentication
+    if (!web_authenticate(request)) return;
+
+    // Stream the JSON list straight into the response
+    AsyncResponseStream *response = request->beginResponseStream("application/json");
+    if (response == nullptr) {
+        request->send(500, "text/plain", "Out of memory");
+        return;
+    }
+    cmd_list_json(*response);
+    request->send(response);
+}
+
+/** @brief Handles HTTP GET request for the stored Wi-Fi settings as JSON ("/api/config/wifi"). The password is never returned. */
+static void handleConfigWifi(AsyncWebServerRequest *request) {
+    // Checking authentication
+    if (!web_authenticate(request)) return;
+
+    AsyncResponseStream *response = request->beginResponseStream("application/json");
+    if (response == nullptr) {
+        request->send(500, "text/plain", "Out of memory");
+        return;
+    }
+
+    // Build the document from the stored settings (static IP fields are the saved values, not the live lease)
+    JsonDocument doc;
+    doc["client_id"]    = getWifiClientID();
+    doc["ssid"]         = getWifiSSID();
+    doc["ip"]           = getWifiIP();
+    doc["gw"]           = getWifiGateway();
+    doc["sn"]           = getWifiSubnet();
+    doc["dns"]          = getWifiDNS1();
+    doc["has_password"] = getWifiPassword().length() > 0;
+
+    serializeJson(doc, *response);
+    request->send(response);
+}
+
+/** @brief Handles HTTP GET request for the stored MQTT settings as JSON ("/api/config/mqtt"). The password is never returned. */
+static void handleConfigMqtt(AsyncWebServerRequest *request) {
+    // Checking authentication
+    if (!web_authenticate(request)) return;
+
+    AsyncResponseStream *response = request->beginResponseStream("application/json");
+    if (response == nullptr) {
+        request->send(500, "text/plain", "Out of memory");
+        return;
+    }
+
+    JsonDocument doc;
+    doc["server"]       = getMqttServer();
+    doc["port"]         = getMqttPort();
+    doc["user"]         = getMqttUser();
+    doc["topic"]        = getMqttDataTopic();
+    doc["rpc_topic"]    = getMqttRpcTopic();
+    doc["interval"]     = getMqttInterval();
+    doc["has_password"] = getMqttPass().length() > 0;
+
+    serializeJson(doc, *response);
+    request->send(response);
+}
+
 /** @brief Handles HTTP GET request for live system diagnostic and network statistics ("/stats"). */
 static void handleStats(AsyncWebServerRequest *request) {
     if (!web_authenticate(request)) return;
@@ -143,7 +222,9 @@ static void handleSaveWifi(AsyncWebServerRequest *request) {
     if (!web_authenticate(request)) return;
 
     String ssid      = request->hasParam("ssid", true)      ? request->getParam("ssid", true)->value() : getWifiSSID();
-    String pass      = request->hasParam("pass", true)      ? request->getParam("pass", true)->value() : getWifiPassword();
+    // An empty or missing password keeps the stored one (the password is never sent to the browser)
+    String pass      = request->hasParam("pass", true)      ? request->getParam("pass", true)->value() : String();
+    if (pass.length() == 0) pass = getWifiPassword();
     String clientId  = request->hasParam("client_id", true) ? request->getParam("client_id", true)->value() : getWifiClientID();
     String ip        = request->hasParam("ip", true)        ? request->getParam("ip", true)->value() : getWifiIP();
     String gw        = request->hasParam("gw", true)        ? request->getParam("gw", true)->value() : getWifiGateway();
@@ -181,7 +262,9 @@ static void handleSaveMqtt(AsyncWebServerRequest *request) {
     String server   = request->hasParam("server", true)    ? request->getParam("server", true)->value() : getMqttServer();
     uint16_t port   = request->hasParam("port", true)      ? (uint16_t)request->getParam("port", true)->value().toInt() : getMqttPort();
     String user     = request->hasParam("user", true)      ? request->getParam("user", true)->value() : getMqttUser();
-    String pass     = request->hasParam("pass", true)      ? request->getParam("pass", true)->value() : getMqttPass();
+    // An empty or missing password keeps the stored one (the password is never sent to the browser)
+    String pass     = request->hasParam("pass", true)      ? request->getParam("pass", true)->value() : String();
+    if (pass.length() == 0) pass = getMqttPass();
     String topic    = request->hasParam("topic", true)     ? request->getParam("topic", true)->value() : getMqttDataTopic();
     String rpcTopic = request->hasParam("rpc_topic", true) ? request->getParam("rpc_topic", true)->value() : getMqttRpcTopic();
     uint32_t interval = request->hasParam("interval", true) ? (uint32_t)request->getParam("interval", true)->value().toInt() : getMqttInterval();
@@ -223,6 +306,10 @@ void register_api_routes(AsyncWebServer *server) {
     server->on("/saveWifi", HTTP_POST, handleSaveWifi);
     server->on("/saveMqtt", HTTP_POST, handleSaveMqtt);
     server->on("/api/telemetry", HTTP_GET, handleTelemetry);
+    server->on("/api/gpio", HTTP_GET, handleGpio);
+    server->on("/api/commands", HTTP_GET, handleCommands);
+    server->on("/api/config/wifi", HTTP_GET, handleConfigWifi);
+    server->on("/api/config/mqtt", HTTP_GET, handleConfigMqtt);
     server->on("/stats", HTTP_GET, handleStats);
 }
 
