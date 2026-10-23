@@ -61,6 +61,8 @@ static XdrvFunc_t s_xadp_table[NUM_ADAPTERS] = {
 };
 
 static TaskHandle_t s_dispatcher_task_handle = NULL;
+static volatile DispatchHook_t s_dispatch_hook = NULL;   /* Optional forwarder to script handlers */
+static volatile bool s_dispatcher_ready = false;   /* Set once SIG_INIT has run for all modules */
 static volatile uint8_t s_10ms_counter = 0;
 static volatile uint8_t s_100ms_counter = 0;
 
@@ -95,9 +97,11 @@ static void IRAM_ATTR on_dispatcher_timer(void* arg) {
 }
 
 /**
- * @brief Internal function to execute drivers for a given signal
+ * @brief Internal function to execute drivers for a given signal, then the optional hook (script handlers).
+ * @param signal Signal to execute.
+ * @param sync True when called from dispatch_signal_sync (caller's task), false from the dispatcher task.
  */
-static void execute_dispatch(Signal_t signal) {
+static void execute_dispatch(Signal_t signal, bool sync) {
     for (uint8_t i = 0; i < NUM_DRIVERS; i++) {
         if (s_xdrv_table[i] != NULL) {
             s_xdrv_table[i](signal);
@@ -112,6 +116,11 @@ static void execute_dispatch(Signal_t signal) {
         if (s_xadp_table[i] != NULL) {
             s_xadp_table[i](signal);
         }
+    }
+    // Forward to script handlers after the native modules
+    DispatchHook_t hook = s_dispatch_hook;
+    if (hook != NULL) {
+        hook(signal, sync);
     }
 }
 
@@ -149,6 +158,8 @@ static void vDispatcherTask(void *pvParameters) {
                 s_xadp_table[i] = NULL;
         }
     }
+    // Tables are final now: synchronous dispatch from other tasks is allowed
+    s_dispatcher_ready = true;
     for (;;) {
         /* Wait indefinitely for a notification, might be constain multiple set bits */
         if (xTaskNotifyWait(0x00, ULONG_MAX, &notified_bits, portMAX_DELAY) == pdTRUE) {
@@ -157,7 +168,7 @@ static void vDispatcherTask(void *pvParameters) {
             {
                 Signal_t sig = (Signal_t) __builtin_ctz(notified_bits); // Get the index of the least significant (Count Trailing Zeros) 
                 if (sig < SIG_MAX) {
-                    execute_dispatch(sig);
+                    execute_dispatch(sig, false);
                 }
                 notified_bits &= ~(1UL << sig); // Clear the dispatched bit
             }
@@ -196,6 +207,18 @@ void dispatch_signal(Signal_t signal) {
 
     uint32_t bit_to_set = (1UL << signal);
     xTaskNotify(s_dispatcher_task_handle, bit_to_set, eSetBits);
+}
+
+void dispatcher_set_hook(DispatchHook_t hook) {
+    s_dispatch_hook = hook;
+}
+
+void dispatch_signal_sync(Signal_t signal) {
+    // Before SIG_INIT finished the module tables are not final (a module may still be removed)
+    if (!s_dispatcher_ready || signal >= SIG_MAX)
+        return;
+
+    execute_dispatch(signal, true);
 }
 
 void dispatch_signal_from_isr(Signal_t signal, BaseType_t *pxHigherPriorityTaskWoken) {
