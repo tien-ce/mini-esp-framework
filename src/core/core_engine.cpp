@@ -274,7 +274,7 @@ void CoreEngine_Start() {
     xTaskCreatePinnedToCore(
        vMqttTask,
        "MqttTask",
-       4096,
+       6144,   // drivers now run their SIG_MQTT_PUBLISH handler on this stack (dispatch_signal_sync)
        NULL,
        3,
        NULL,
