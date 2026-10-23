@@ -182,7 +182,7 @@ void vMqttTask(void *pvParameters) {
                 }
 
                 /* Step 2: Let drivers append their telemetry via mqtt_add_telemetry() */
-                dispatch_signal(SIG_MQTT_PUBLISH);
+                dispatch_signal_sync(SIG_MQTT_PUBLISH);
 
                 /* Step 3: Re-take the mutex, serialize the payload and publish it */
                 if (mqttMutex != NULL && xSemaphoreTake(mqttMutex, portMAX_DELAY) == pdTRUE) {
