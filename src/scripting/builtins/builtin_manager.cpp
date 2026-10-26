@@ -11,4 +11,7 @@ void builtins_init(void) {
     builtin_nvs_init();
     builtin_mqtt_init();
     builtin_script_init();
+    builtin_dispatcher_init();
+    builtin_modbus_init();
+    builtin_serial_raw_init();
 }

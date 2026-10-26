@@ -11,6 +11,8 @@ typedef struct {
     char name[32]; /* Name of script used to manage */
     ti_handle_t handle;    /* runtime handle used to stop task safely (stale handles are rejected) */
     char *source_code; // pointer use to allocate new code, avoid code is deleted in build time
+    ti_program_t *prog;    /* compiled program, NULL until ti_compile returns (freed by the fatal callback too) */
+    TaskHandle_t rtos_task; /* FreeRTOS task running the script, used by the fatal callback to find this entry */
 } tien_task_t;
 
 /** @brief Executes a Tien script from a LittleFS file path. */
