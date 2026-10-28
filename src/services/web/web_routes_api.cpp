@@ -118,9 +118,9 @@ static void handleSaveModule(AsyncWebServerRequest *request) {
 static void handleTelemetry(AsyncWebServerRequest *request) {
     if (!web_authenticate(request)) return;
 
+    web_begin_telemetry_poll();
     dispatch_signal_sync(SIG_WEB_POLL);
     request->send(200, "application/json", web_get_telemetry_json());
-    web_clear_telemetry_json();
 }
 
 /** @brief Handles HTTP GET request for the GPIO pin mapping as JSON ("/api/gpio"). */

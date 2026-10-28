@@ -7,6 +7,8 @@
 #include "config.h"
 #include <ArduinoJson.h>
 #include <WiFi.h>
+#include <freertos/semphr.h>
+#include <string.h>
 
 /* -------------------------------------------------------------------------- */
 /*                              STATIC VARIABLES                              */
@@ -15,9 +17,29 @@
 /* For registering rows in dynamic table */
 static String tableRowsHTML = "";
 
-/* Buffer dynamic JSON for HTTP Polling responses */
-static JsonDocument telemetryDoc;
-static String telemetryJson = "{}";
+/*
+ * Telemetry table for HTTP polling. A key keeps its last value until it has not been updated for
+ * TELEMETRY_MAX_AGE polls, so a poll where a script handler missed its window does not drop the row.
+ */
+#define TELEMETRY_MAX_KEYS   30   /* Rows the table can hold */
+#define TELEMETRY_KEY_LEN    30   /* Key buffer size, including the terminator */
+#define TELEMETRY_VALUE_LEN  32   /* Value buffer size, including the terminator */
+#define TELEMETRY_MAX_AGE    3    /* Polls in a row a key may go without an update before it is removed */
+
+typedef struct {
+    char     key[TELEMETRY_KEY_LEN];      /* key[0] == '\0' marks a free slot */
+    char     value[TELEMETRY_VALUE_LEN];
+    uint32_t last_poll;                   /* s_poll_count when the key was last written */
+} telemetry_entry_t;
+
+static telemetry_entry_t s_telemetry[TELEMETRY_MAX_KEYS];
+static uint32_t s_poll_count = 0;
+
+/** @brief Returns the mutex guarding the telemetry table (written by driver/script tasks, read by the web task). */
+static SemaphoreHandle_t telemetryMutex() {
+    static SemaphoreHandle_t m = xSemaphoreCreateMutex();
+    return m;
+}
 
 /** Longest placeholder name (without the surrounding '%') the scanner will look for. */
 #define TPL_MAX_TOKEN_LEN 20
@@ -376,19 +398,63 @@ void web_build_gpio_json(Print &out) {
     serializeJson(doc, out);
 }
 
-/* This function called from drives want to update these value into the web */
+/* This function called from drives and scripts to update these value into the web */
 void updateElementValue(const String& key, const String& newValue) {
-    telemetryDoc[key] = newValue;
+    if (key.length() == 0) return;
+
+    xSemaphoreTake(telemetryMutex(), portMAX_DELAY);
+    telemetry_entry_t *slot = NULL;
+    for (int i = 0; i < TELEMETRY_MAX_KEYS; i++) {
+        if (strcmp(s_telemetry[i].key, key.c_str()) == 0) {
+            slot = &s_telemetry[i];
+            break;
+        }
+        if (slot == NULL && s_telemetry[i].key[0] == '\0') {
+            slot = &s_telemetry[i];
+        }
+    }
+    if (slot != NULL) {
+        /* A key found by name is reused; otherwise slot is the first free entry */
+        strlcpy(slot->key, key.c_str(), sizeof(slot->key));
+        strlcpy(slot->value, newValue.c_str(), sizeof(slot->value));
+        slot->last_poll = s_poll_count;
+    }
+    xSemaphoreGive(telemetryMutex());
+
+    if (slot == NULL) {
+        LOG_WARNING("[Web] Telemetry table is full, '" + key + "' dropped");
+    }
+}
+
+/* Called at the start of each poll: ages are counted in polls */
+void web_begin_telemetry_poll() {
+    xSemaphoreTake(telemetryMutex(), portMAX_DELAY);
+    s_poll_count++;
+    xSemaphoreGive(telemetryMutex());
 }
 
 /* This function is called when the client call to server to get the telemetries to show into web */
 String web_get_telemetry_json() {
-    telemetryJson = "";
-    serializeJson(telemetryDoc, telemetryJson);
-    return telemetryJson;
-}
+    JsonDocument doc;
 
-void web_clear_telemetry_json() {
-    telemetryJson = "{}";
-    telemetryDoc.clear();
+    xSemaphoreTake(telemetryMutex(), portMAX_DELAY);
+    for (int i = 0; i < TELEMETRY_MAX_KEYS; i++) {
+        if (s_telemetry[i].key[0] == '\0') continue;
+
+        /* Drop keys nobody has refreshed for too long (e.g. the script that owned them stopped) */
+        if (s_poll_count - s_telemetry[i].last_poll > TELEMETRY_MAX_AGE) {
+            s_telemetry[i].key[0] = '\0';
+            continue;
+        }
+        doc[s_telemetry[i].key] = s_telemetry[i].value;
+    }
+    xSemaphoreGive(telemetryMutex());
+
+    String json;
+    if (doc.isNull()) {
+        json = "{}";
+    } else {
+        serializeJson(doc, json);
+    }
+    return json;
 }
