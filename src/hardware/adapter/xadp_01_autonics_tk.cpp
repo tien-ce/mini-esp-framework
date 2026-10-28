@@ -1,14 +1,17 @@
 #include "config.h"
+#ifdef USE_MODBUS_MASTER
 #ifdef USE_AUTONICS_TK_ADAPTER
 #include <Arduino.h>
 #include "core/core_engine.h"
-#include "modbus.h"
+#include "core/core_log.h"
+#include "hardware/protocol/modbus_master.h"
 #include "built_in.h"
 #include "TienInterpreter.h"
 
 #define START_REG_ADDR      0x03E8
 #define REG_COUNT           6     
-#define READ_INPUT_REG      0x04 
+#define READ_INPUT_REG      0x04
+#define READ_TIMEOUT_MS     500
 
 /* -------------------------------------------------------------------------- */
 /*                        INTERPRETER BUILT-IN FUNCTIONS                      */
@@ -21,10 +24,6 @@ struct AutonicsTKData {
     uint8_t unit_code;
 };
 
-static bool modbus_initialized = false;
-static int8_t rs485_tx_pin = GPIO_INVALID;
-static int8_t rs485_rx_pin = GPIO_INVALID;
-static int8_t rs485_de_pin = GPIO_INVALID;
 static const char* GetUnitString(uint8_t unit_code) {
     switch (unit_code) {
         case 0: return "°C";
@@ -52,53 +51,45 @@ static void FormatValueWithDecimal(uint16_t raw_val, uint8_t dp, char* out_buf, 
     }
 }
 
-static void ParseTKRegisters(const uint8_t* rx_buf, uint16_t rx_len, AutonicsTKData* out_data) {
-    out_data->raw_pv        = (rx_buf[0] << 8) | rx_buf[1];
-    out_data->decimal_point = (rx_buf[2] << 8) | rx_buf[3];
-    out_data->unit_code     = (rx_buf[4] << 8) | rx_buf[5];
-    out_data->raw_sv        = (rx_buf[6] << 8) | rx_buf[7];
-}
-
-static bool CheckRS485PinConfig() {
-    if (!is_use_name("RS485_TX") || !is_use_name("RS485_RX")) {
-        return false;
-    }
-
-    rs485_tx_pin = get_gpio_by_name("RS485_TX");
-    rs485_rx_pin = get_gpio_by_name("RS485_RX");
-    if (is_use_name("RS485_DE"))
-        rs485_de_pin = get_gpio_by_name("RS485_DE");
-
-    if (rs485_tx_pin == GPIO_INVALID || rs485_rx_pin == GPIO_INVALID) {
-        LOG_ERROR("Failed to resolve GPIO pins for RS485.");
-        return false;
-    }
-
-    LOG_INFO("RS485 pins resolved | TX: " + String(rs485_tx_pin) + " | RX: " + String(rs485_rx_pin) + " | DE: " + String(rs485_de_pin));
-    return true;
+static void ParseTKRegisters(const uint16_t* regs, AutonicsTKData* out_data) {
+    out_data->raw_pv        = regs[0];
+    out_data->decimal_point = regs[1];
+    out_data->unit_code     = regs[2];
+    out_data->raw_sv        = regs[3];
 }
 
 static value_t *autonic_read(ti_handle_t handle, value_t **argv, int argc) {
-    int slave_id = argv[0]->int_val;
+    int port     = argv[0]->int_val;
+    int slave_id = argv[1]->int_val;
+
+    /* Script mistakes are raised (also stops a wrong number wrapping in the casts below) */
+    if (port < 1 || port > SERIAL_BUS_PORT_COUNT) {
+        ti_raise_error(handle, TI_ERR_VALUE_OUT_OF_RANGE, "autonics_read: port must be 1..%d, got %d",
+                       SERIAL_BUS_PORT_COUNT, port);
+        return NULL;
+    }
+    if (slave_id < 0 || slave_id > 255) {
+        ti_raise_error(handle, TI_ERR_VALUE_OUT_OF_RANGE, "autonics_read: slave_address must be 0..255, got %d", slave_id);
+        return NULL;
+    }
+
     value_t *dict_val = val_new_dict();
 
-    SendRetType ret = ModbusSend(slave_id, READ_INPUT_REG, START_REG_ADDR, REG_COUNT, 200);
-    if (ret == ESEND_NOERR) {
-        UCHAR rx_buf[256];
-        USHORT rx_len = 0;
-        ModbusReceive(rx_buf, &rx_len);
-
-        /* Each register = 2 bytes, not sure the lib already capture this error or not*/
-        if (rx_len < (REG_COUNT * 2)) {
-            LOG_WARNING("[Xadp1] Modbus response frame incomplete!");
-            val_dict_set(dict_val->dict_val, "success", val_new_bool(false));
-            val_dict_set(dict_val->dict_val, "error", val_new_string("Invalid response"));
-            return dict_val;
+    uint8_t answer[MODBUS_MASTER_MAX_RESPONSE];
+    size_t answer_len = sizeof(answer);
+    ModbusMasterStatus_t ret = ModbusMaster_Send((uint8_t)port, (uint8_t)slave_id, READ_INPUT_REG, START_REG_ADDR,
+                                                 REG_COUNT, READ_TIMEOUT_MS, answer, &answer_len);
+    val_dict_set(dict_val->dict_val, "status", val_new_string(ModbusMaster_StatusToStr(ret)));
+    if (ret == MBM_OK) {
+        /* Registers arrive as bytes, high byte first */
+        uint16_t regs[REG_COUNT];
+        for (int i = 0; i < REG_COUNT; i++) {
+            regs[i] = (uint16_t)((answer[2 * i] << 8) | answer[2 * i + 1]);
         }
 
-        /* Format data from buffer to value */
+        /* Format data from registers to value */
         AutonicsTKData data;
-        ParseTKRegisters(rx_buf, rx_len, &data);
+        ParseTKRegisters(regs, &data);
 
         /* Get the value in string format */
         char pv_str[20], sv_str[20];
@@ -106,15 +97,12 @@ static value_t *autonic_read(ti_handle_t handle, value_t **argv, int argc) {
         FormatValueWithDecimal(data.raw_pv, data.decimal_point, pv_str, sizeof(pv_str));
         FormatValueWithDecimal(data.raw_sv, data.decimal_point, sv_str, sizeof(sv_str));
 
-        val_dict_set(dict_val->dict_val, "success", val_new_bool(true));
         val_dict_set(dict_val->dict_val, "pv", val_new_float(atof(pv_str)));
         val_dict_set(dict_val->dict_val, "sv", val_new_float(atof(sv_str)));
         val_dict_set(dict_val->dict_val, "unit", val_new_string(unit_str));
     }
     else {
-        val_dict_set(dict_val->dict_val, "success", val_new_bool(false));
-        val_dict_set(dict_val->dict_val, "error", val_new_string(ModbusErrToStr(ret)));
-        LOG_WARNING("[Xadp1] Failed to read Modbus.");
+        LOG_WARNING(String("[Xadp1] Failed to read Modbus: ") + ModbusMaster_StatusToStr(ret));
     }
     return dict_val;
 }
@@ -122,25 +110,15 @@ static value_t *autonic_read(ti_handle_t handle, value_t **argv, int argc) {
 bool Xadp1(Signal_t signal) {
     switch (signal) {
         case SIG_INIT: {
-            if (!CheckRS485PinConfig()) {
-                return false;
-            }
-            bool ok = ModbusInit(9600, RTU_8N1, rs485_tx_pin, rs485_rx_pin, rs485_de_pin);
-            if (!ok) {
-                LOG_ERROR("[Xadp1] Init Modbus failed!");
-                return false;
-            }
-            ModbusStart();
-            modbus_initialized = true;
-            /* Register builtin */
-            static param_t tk_addr_param[] = { { VAL_INT, (char*)"slave_address" } };
-            register_builtin_function("autonics_read", VAL_DICT, tk_addr_param, 1, autonic_read);
-            LOG_INFO("[Xadp1] Init Modbus successfully");
+            /* The port is opened by the script (modbus_open), the adapter only registers its built-in */
+            static param_t tk_params[] = { { VAL_INT, (char*)"port" }, { VAL_INT, (char*)"slave_address" } };
+            register_builtin_function("autonics_read", VAL_DICT, tk_params, 2, autonic_read);
+            LOG_INFO("[Xadp1] Init successfully");
             return true;
         }
         default:
             return true;
     }
 }
-
 #endif // USE_AUTONICS_TK_ADAPTER
+#endif // MODBUS MASTER
