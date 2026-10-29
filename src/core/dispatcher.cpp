@@ -128,8 +128,8 @@ static void execute_dispatch(Signal_t signal, bool sync) {
  * @brief Dispatcher Task: Sleeps until notified by ISR or non-ISR calls
  */
 static void vDispatcherTask(void *pvParameters) {
-  /* Wait until log system is ready */
-    waiting_on_event(SYSTEM_EVENT, SYS_NORMAL, portMAX_DELAY);
+    /* Wait until boot is complete (set by main after services_start) */
+    core_state_wait(g_system_state_group, (uint8_t)SYS_NORMAL, portMAX_DELAY);
     uint32_t notified_bits = 0;
     //execute_dispatch(SIG_INIT); // Initial dispatch for all drivers
     for (uint8_t i = 0; i < NUM_DRIVERS; i++) {
