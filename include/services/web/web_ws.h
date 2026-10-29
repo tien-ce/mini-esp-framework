@@ -3,6 +3,15 @@
 
 #include <ESPAsyncWebServer.h>
 
+/* HTML Color Wrappers for Web (WebSocket) */
+#define WEB_COLOR_RESET   "</span>"
+#define WEB_COLOR_RED     "<span style='color:#ff4d4d;'>"
+#define WEB_COLOR_GREEN   "<span style='color:#00ff00;'>"
+#define WEB_COLOR_YELLOW  "<span style='color:#ffff00;'>"
+#define WEB_COLOR_CYAN    "<span style='color:#00ffff;'>"
+#define WEB_COLOR_WHITE   "<span style='color:#ffffff;'>"
+#define WEB_COLOR_GRAY    "<span style='color:#aaaaaa;'>"
+
 /* -------------------------------------------------------------------------- */
 /*                              EXTERNAL VARIABLES                            */
 /* -------------------------------------------------------------------------- */
