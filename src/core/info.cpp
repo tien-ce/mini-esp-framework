@@ -3,6 +3,7 @@
 #include <esp_chip_info.h>
 #include <esp_mac.h>
 #include <stdio.h>
+#include <string.h>
 
 /* -------------------------------------------------------------------------- */
 /*                              STATIC VARIABLES                              */
@@ -67,6 +68,15 @@ const char* esp_info_get_model(void) {
     return s_device_info.model;
 }
 
+const char* esp_info_get_chip_short(void) {
+    const char *model = esp_info_get_model();
+    /* "ESP32-S3" -> "S3"; plain "ESP32" and the generic fallback stay "ESP32" */
+    if (strncmp(model, "ESP32-", 6) == 0 && strcmp(model + 6, "Generic") != 0) {
+        return model + 6;
+    }
+    return "ESP32";
+}
+
 const char* esp_info_get_mac_str(void) {
     if (!s_device_info.is_loaded) esp_info_load();
     return s_device_info.mac_str;
@@ -82,4 +92,28 @@ uint32_t esp_info_get_uptime_sec(void) {
 
 uint32_t esp_info_get_free_heap(void) {
     return ESP.getFreeHeap();
+}
+
+uint32_t esp_info_get_total_heap(void) {
+    return ESP.getHeapSize();
+}
+
+uint32_t esp_info_get_min_free_heap(void) {
+    return ESP.getMinFreeHeap();
+}
+
+uint32_t esp_info_get_free_psram(void) {
+    return ESP.getFreePsram();
+}
+
+uint32_t esp_info_get_total_psram(void) {
+    return ESP.getPsramSize();
+}
+
+uint32_t esp_info_get_flash_size(void) {
+    return ESP.getFlashChipSize();
+}
+
+const char* esp_info_get_sdk_version(void) {
+    return ESP.getSdkVersion();
 }

@@ -213,9 +213,9 @@ static void tplEmitToken(TplWriter &w, TplToken tk, const TplSnapshot &snap) {
     // Dispatch on the placeholder id; each branch writes its value directly into the writer
     switch (tk) {
     case TK_HEADER_TITLE:    tplEmit(w, "ESP32S3"); break;
-    case TK_HEADER_SUBTITLE: tplEmit(w, "ESP mini framework " FIRMWARE_VERSION); break;
-    case TK_FOOTER_TEXT:     tplEmit(w, "ESP mini framework " FIRMWARE_VERSION " by Văn Tiến"); break;
-    case TK_APP_VERSION:     tplEmit(w, FIRMWARE_VERSION); break;
+    case TK_HEADER_SUBTITLE: tplEmit(w, "ESP mini framework " FW_VERSION_STR); break;
+    case TK_FOOTER_TEXT:     tplEmit(w, "ESP mini framework " FW_VERSION_STR " by Văn Tiến"); break;
+    case TK_APP_VERSION:     tplEmit(w, FW_VERSION_STR); break;
     case TK_BUILD_DATE:      tplEmit(w, __DATE__ " " __TIME__); break;
     case TK_SDK_VERSION:     tplEmit(w, ESP.getSdkVersion()); break;
     case TK_HOSTNAME: {
