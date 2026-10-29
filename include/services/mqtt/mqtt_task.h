@@ -48,6 +48,13 @@ bool mqtt_add_telemetry(const String &key, T value);
 /*                              CORE ENGINE API                               */
 /* -------------------------------------------------------------------------- */
 
+bool is_mqtt_connected();
+
+/**
+ * @brief Starts the FreeRTOS MQTT client task.
+ */
+void mqtt_task_start();
+
 /**
  * @brief FreeRTOS task that maintains the MQTT broker connection and periodically publishes telemetry.
  *

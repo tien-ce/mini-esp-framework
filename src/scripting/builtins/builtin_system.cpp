@@ -1,5 +1,5 @@
 #include "built_in.h"
-#include "built_in.h"
+#include "services/mqtt/mqtt_task.h"
 #include "TienInterpreter.h"
 #include "core/core_log.h"
 #include "core/core_engine.h"
@@ -84,7 +84,7 @@ static value_t *built_in_get_device_info(ti_handle_t handle, value_t **argv, int
     infoSet(info, "ssid", val_new_string(getWifiSSID().c_str()));
     infoSet(info, "wifi_connected", val_new_bool(connected));
     infoSet(info, "rssi", val_new_int(connected ? get_wifi_rssi() : 0));
-    infoSet(info, "mqtt_connected", val_new_bool(CoreState_GetMqtt() == MQTT_STATE_CONNECTED));
+    infoSet(info, "mqtt_connected", val_new_bool(is_mqtt_connected()));
 
     // Step 2: chip and firmware information from the info provider
     infoSet(info, "mac", val_new_string(esp_info_get_mac_str()));

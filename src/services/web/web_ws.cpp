@@ -236,6 +236,27 @@ static void onWsTienEvent(AsyncWebSocket *server, AsyncWebSocketClient *client, 
 /*                              PUBLIC FUNCTIONS                              */
 /* -------------------------------------------------------------------------- */
 
+static void web_ws_log_sink(const String &msg, LogLevel level) {
+    if (ws.count() == 0) return;
+
+    switch (level) {
+        case LOG_LEVEL_DEBUG:
+            ws.textAll(String(WEB_COLOR_WHITE) + msg + WEB_COLOR_RESET);
+            break;
+        case LOG_LEVEL_INFO:
+            ws.textAll(String(WEB_COLOR_GREEN) + msg + WEB_COLOR_RESET);
+            break;
+        case LOG_LEVEL_WARNING:
+            ws.textAll(String(WEB_COLOR_YELLOW) + msg + WEB_COLOR_RESET);
+            break;
+        case LOG_LEVEL_ERROR:
+            ws.textAll(String(WEB_COLOR_RED) + msg + WEB_COLOR_RESET);
+            break;
+        default:
+            break;
+    }
+}
+
 void web_ws_init(AsyncWebServer *server) {
     if (server == nullptr) return;
     ws.setAuthentication(getWebUsername().c_str(), getWebPassword().c_str());
@@ -245,6 +266,8 @@ void web_ws_init(AsyncWebServer *server) {
     ws_tien.setAuthentication(getWebUsername().c_str(), getWebPassword().c_str());
     ws_tien.onEvent(onWsTienEvent);
     server->addHandler(&ws_tien);
+
+    core_log_register_cb(web_ws_log_sink);
 }
 
 void web_ws_cleanup() {
