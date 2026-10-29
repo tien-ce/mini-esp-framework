@@ -19,19 +19,25 @@
 #define STATUS_BIT_HEATING_OUT  8       /* Status (lower word): control output (heating) ON */
 #define READ_TIMEOUT_MS     500
 
+extern ModbusMasterStatus_t modbus_send_async(ti_handle_t handle,
+                                              uint8_t port, uint8_t slave, uint8_t function,
+                                              uint16_t address, uint16_t quantity, uint32_t timeout_ms,
+                                              uint8_t *buf, size_t *len);
+
 /**
  * @brief Read consecutive holding registers of one slave.
+ * @param handle Calling runtime handle.
  * @param port Modbus port number.
  * @param slave Slave address.
  * @param address First register.
  * @param count Number of registers, at most MODBUS_MASTER_MAX_RESPONSE / 2.
  * @param regs Receives the registers (count entries).
- * @return MBM_OK or the error of ModbusMaster_Send.
+ * @return MBM_OK or the error of modbus_send_async.
  */
-static ModbusMasterStatus_t ReadRegisters(uint8_t port, uint8_t slave, uint16_t address, uint16_t count, uint16_t *regs) {
+static ModbusMasterStatus_t ReadRegisters(ti_handle_t handle, uint8_t port, uint8_t slave, uint16_t address, uint16_t count, uint16_t *regs) {
     uint8_t answer[MODBUS_MASTER_MAX_RESPONSE];
     size_t answer_len = sizeof(answer);
-    ModbusMasterStatus_t ret = ModbusMaster_Send(port, slave, READ_HOLDING_REG, address, count,
+    ModbusMasterStatus_t ret = modbus_send_async(handle, port, slave, READ_HOLDING_REG, address, count,
                                                  READ_TIMEOUT_MS, answer, &answer_len);
     if (ret != MBM_OK) return ret;
 
@@ -74,9 +80,9 @@ static value_t *omron_e5cc_read_config(ti_handle_t handle, value_t **argv, int a
     // Step 2: transaction 1 = decimal point, transaction 2 = input type + temperature unit
     uint16_t decimal_point = 0;
     uint16_t type_unit[2] = { 0, 0 };
-    ModbusMasterStatus_t ret = ReadRegisters((uint8_t)port, (uint8_t)slave, REG_DECIMAL_POINT, 1, &decimal_point);
+    ModbusMasterStatus_t ret = ReadRegisters(handle, (uint8_t)port, (uint8_t)slave, REG_DECIMAL_POINT, 1, &decimal_point);
     if (ret == MBM_OK) {
-        ret = ReadRegisters((uint8_t)port, (uint8_t)slave, REG_INPUT_TYPE, 2, type_unit);
+        ret = ReadRegisters(handle, (uint8_t)port, (uint8_t)slave, REG_INPUT_TYPE, 2, type_unit);
     }
 
     // Step 3: build the result; val_dict_set takes the value even when it fails, so every call is made
@@ -134,9 +140,9 @@ static value_t *omron_e5cc_read_value(ti_handle_t handle, value_t **argv, int ar
     // Step 2: transaction 1 = PV / status / heater current / MV, transaction 2 = set point
     uint16_t op[REG_OPERATION_COUNT] = { 0 };
     uint16_t sp = 0;
-    ModbusMasterStatus_t ret = ReadRegisters((uint8_t)port, (uint8_t)slave, REG_OPERATION, REG_OPERATION_COUNT, op);
+    ModbusMasterStatus_t ret = ReadRegisters(handle, (uint8_t)port, (uint8_t)slave, REG_OPERATION, REG_OPERATION_COUNT, op);
     if (ret == MBM_OK) {
-        ret = ReadRegisters((uint8_t)port, (uint8_t)slave, REG_SET_POINT, 1, &sp);
+        ret = ReadRegisters(handle, (uint8_t)port, (uint8_t)slave, REG_SET_POINT, 1, &sp);
     }
 
     // Step 3: build the result; val_dict_set takes the value even when it fails, so every call is made

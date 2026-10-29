@@ -2,7 +2,6 @@
 #include "core/core_log.h"
 #include "services/logger/log_task.h"
 #include "core/file_system.h"
-#include "services/web/web_ws.h"
 #include "built_in.h"
 #include "TienInterpreter.h"
 #include "include/ti_runtime.h"
@@ -96,18 +95,16 @@ static bool has_tien_extension(const char *path) {
     return strcmp(path + len - ext_len, ext) == 0;
 }
 
-/** @brief Logging callback function registered to TienInterpreter to route output to Serial and Web. */
+/** @brief Logging callback function registered to TienInterpreter. */
 static void tien_log_callback(const char *fmt, va_list args) {
     char buffer[256];
     vsnprintf(buffer, sizeof(buffer), fmt, args);
-    Serial.print(buffer);
-    tien_out_to_ws(buffer);
+    LOG_ERROR(buffer);
 }
 
 /** @brief Fatal error callback registered to TienInterpreter to log and terminate task. */
 static void tien_fatal_callback(void) {
     LOG_ERROR("Interpreter fatal error occurred!");
-    tien_out_to_ws("[Fatal Error]: Interpreter execution halted.\n");
 
     /* This task never returns to interpreter_task, so its cleanup must happen here */
     tien_task_t *task = find_current_tien_task();
@@ -157,11 +154,12 @@ static void interpreter_task(void *pvParameters) {
                 /* 2. Execute program on dedicated runtime instance (a runtime error ends in tien_fatal_callback) */
                 ti_execute(task->handle, task->prog);
             } else {
-                ti_log("[ERROR] Compilation failed for script '%s'\n", task->name);
+                LOG_ERROR_STR("Compilation failed for script '%s'", task->name);
             }
         }
 
         /* 3. Free program, runtime and descriptor, and remove the task from the tracking list */
+        LOG_INFO("Tien task '" + String(task->name) + "' ended");
         release_tien_task(task);
     }
     /* 4. Task terminates itself cleanly with no held mutexes or leaked memory */
@@ -192,14 +190,14 @@ void tien_run_file(const char *path) {
 void tien_run_script(const char *name, const char *source_code) {
     /* Check the NULL pointer for safely */
     if (name == NULL || strlen(name) == 0 || source_code == NULL) {
-        ti_log("[ERROR] Invalid script name or source code\n");
+        LOG_ERROR("Invalid script name or source code");
         return;
     }
 
     /* Create new task_t to pass to task, copy name and source code to free independently (calloc: prog and rtos_task start NULL) */
     tien_task_t *task = (tien_task_t *)calloc(1, sizeof(tien_task_t));
     if (task == NULL) {
-        ti_log("[ERROR] Memory allocation failed for task '%s'\n", name);
+        LOG_ERROR_STR("Memory allocation failed for task '%s'", name);
         return;
     }
 
@@ -209,7 +207,7 @@ void tien_run_script(const char *name, const char *source_code) {
     task->source_code = strdup(source_code);
     if (task->source_code == NULL) {
         free(task);
-        ti_log("[ERROR] Memory allocation failed for task '%s'\n", name);
+        LOG_ERROR_STR("Memory allocation failed for task '%s'", name);
         return;
     }
 
@@ -218,7 +216,7 @@ void tien_run_script(const char *name, const char *source_code) {
     if (rt == TI_INVALID_HANDLE) {
         free(task->source_code);
         free(task);
-        ti_log("[ERROR] Failed to allocate runtime for task '%s'\n", name);
+        LOG_ERROR_STR("Failed to allocate runtime for task '%s'", name);
         return;
     }
 
@@ -227,7 +225,7 @@ void tien_run_script(const char *name, const char *source_code) {
 
     /* Register before the task starts: its fatal callback looks itself up in the list (name check is atomic with it) */
     if (!add_tien_task(task)) {
-        ti_log("[ERROR] Task '%s' already exists\n", name);
+        LOG_ERROR_STR("Task '%s' already exists", name);
         ti_destroy(task->handle);
         free(task->source_code);
         free(task);
@@ -239,8 +237,7 @@ void tien_run_script(const char *name, const char *source_code) {
 
     /* Check if task creation failed, cleanup all allocated resources to avoid memory leaks */
     if (ret != pdPASS) {
-        LOG_ERROR("Failed to create interpreter task: " + String(name));
-        ti_log("[ERROR] Failed to create FreeRTOS task '%s'\n", name);
+        LOG_ERROR_STR("Failed to create FreeRTOS task '%s'", name);
         remove_tien_task(task);
         ti_destroy(task->handle);
         free(task->source_code);
@@ -269,7 +266,7 @@ void tien_stop(const char *name) {
     xSemaphoreGive(g_tien_tasks_lock);
 
     if (!found) {
-        ti_log("[ERROR] Task '%s' not found\n", name);
+        LOG_ERROR_STR("Task '%s' not found", name);
         return;
     }
 
@@ -280,7 +277,6 @@ void tien_stop(const char *name) {
      */
     if (handle != TI_INVALID_HANDLE) {
         ti_stop(handle);
-        ti_log("[INFO] Stop requested for task '%s'\n", name);
         LOG_INFO("Stop requested for Tien task '" + String(name) + "'");
     }
 }

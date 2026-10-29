@@ -13,6 +13,11 @@
 #define READ_INPUT_REG      0x04
 #define READ_TIMEOUT_MS     500
 
+extern ModbusMasterStatus_t modbus_send_async(ti_handle_t handle,
+                                              uint8_t port, uint8_t slave, uint8_t function,
+                                              uint16_t address, uint16_t quantity, uint32_t timeout_ms,
+                                              uint8_t *buf, size_t *len);
+
 /* -------------------------------------------------------------------------- */
 /*                        INTERPRETER BUILT-IN FUNCTIONS                      */
 /* -------------------------------------------------------------------------- */
@@ -77,7 +82,7 @@ static value_t *autonic_read(ti_handle_t handle, value_t **argv, int argc) {
 
     uint8_t answer[MODBUS_MASTER_MAX_RESPONSE];
     size_t answer_len = sizeof(answer);
-    ModbusMasterStatus_t ret = ModbusMaster_Send((uint8_t)port, (uint8_t)slave_id, READ_INPUT_REG, START_REG_ADDR,
+    ModbusMasterStatus_t ret = modbus_send_async(handle, (uint8_t)port, (uint8_t)slave_id, READ_INPUT_REG, START_REG_ADDR,
                                                  REG_COUNT, READ_TIMEOUT_MS, answer, &answer_len);
     val_dict_set(dict_val->dict_val, "status", val_new_string(ModbusMaster_StatusToStr(ret)));
     if (ret == MBM_OK) {

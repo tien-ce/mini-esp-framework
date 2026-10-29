@@ -16,12 +16,135 @@
  * A port is opened ONCE and then used by every device (slave) on it.
  */
 #include "config.h"
+#include "modbus.h"
+#include "portmacro.h"
 #ifdef USE_MODBUS_MASTER
 #include "built_in.h"
 #include "TienInterpreter.h"
 #include "hardware/protocol/modbus_master.h"
 #include <Arduino.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/queue.h>
+#include <freertos/task.h>
 
+/* -------------------------------------------------------------------------- */
+/*                                   TYPES                                    */
+/* -------------------------------------------------------------------------- */
+
+typedef struct {
+    /* Input passes to Modbus Send */
+    uint8_t       port;
+    uint8_t       slave;
+    uint8_t       function;
+    uint16_t      address;
+    uint16_t      quantity;
+    uint32_t      timeout_ms;
+
+    /* Output passed to and recive from return of Modbus Send */
+    uint8_t      *buf;
+    size_t       *len;
+    ModbusMasterStatus_t *status;
+
+    // 3. Synchronize with ti script
+    bool         *is_done;  // Atomic flag indicate task done
+    ti_handle_t   handle;   // Script handle runtime
+} ModbusAsyncRequest_t;
+
+/* -------------------------------------------------------------------------- */
+/*                                  Static                                    */
+/* -------------------------------------------------------------------------- */
+
+static QueueHandle_t s_modbus_queue[SERIAL_BUS_PORT_COUNT] = {NULL};     // A queue allow the main script wake up async Modbus task
+static TaskHandle_t  s_modbus_worker[SERIAL_BUS_PORT_COUNT] = {NULL};    // Use to refrence, manage, interact with modbus worker
+static void modbus_worker_task(void *arg)
+{
+    // Type cast arg to get the port_idx
+    uint8_t port_idx = (uint8_t)(uintptr_t)arg;
+    QueueHandle_t port_queue = s_modbus_queue[port_idx];
+    ModbusAsyncRequest_t *req = NULL;
+    for (;;)
+    {
+        // Wait on the queue that it manage
+        if (xQueueReceive(port_queue, (void *)&req, portMAX_DELAY) == pdTRUE && req != NULL)
+        {
+            ModbusMasterStatus_t st = ModbusMaster_Send(req->port, req->slave, req->function,
+                                                        req->address, req->quantity, req->timeout_ms,
+                                                        req->buf, req->len);
+            // Write result to status
+            *(req->status) = st;
+
+            // Turn on flag annouce finish the transaction
+            __atomic_store_n(req->is_done, true, __ATOMIC_RELEASE);
+
+            // Wake up the main script
+            ti_give(req->handle);
+        }
+    }
+}
+
+/**
+ * @brief Performs an asynchronous Modbus transaction using the worker queue.
+ * Declared in built_in.h for use by modbus_send and hardware adapters.
+ */
+ModbusMasterStatus_t modbus_send_async(ti_handle_t handle,
+                                       uint8_t port, uint8_t slave, uint8_t function,
+                                       uint16_t address, uint16_t quantity, uint32_t timeout_ms,
+                                       uint8_t *buf, size_t *len)
+{
+    uint8_t port_idx = port - 1;
+    ModbusMasterStatus_t status = MBM_ERR_TIMEOUT;
+    bool is_done = false;
+
+    ModbusAsyncRequest_t req = {
+        port, slave, function, address, quantity, timeout_ms,
+        buf, len, &status, &is_done, handle
+    };
+
+    ModbusAsyncRequest_t *p_req = &req;
+    xQueueSend(s_modbus_queue[port_idx], &p_req, portMAX_DELAY);
+
+    ti_wait_flag(handle, &is_done, timeout_ms + 100);
+
+    return status;
+}
+
+/**
+ * @brief Starts the worker task and queue for the given port when opened.
+ * @param port Port number (1-based).
+ * @return True on success, false if queue or task creation failed.
+ */
+static bool modbus_worker_start(uint8_t port) {
+    uint8_t port_idx = port - 1;
+    if (port_idx >= SERIAL_BUS_PORT_COUNT) return false;
+
+    if (s_modbus_queue[port_idx] == NULL) {
+        s_modbus_queue[port_idx] = xQueueCreate(4, sizeof(ModbusAsyncRequest_t *));
+        if (s_modbus_queue[port_idx] == NULL) {
+            return false;
+        }
+
+        char task_name[16];
+        snprintf(task_name, sizeof(task_name), "mb_worker_%d", (int)port);
+
+        BaseType_t ret = xTaskCreatePinnedToCore(
+            modbus_worker_task,
+            task_name,
+            4096,
+            (void *)(uintptr_t)port_idx,
+            configMAX_PRIORITIES - 3,
+            &s_modbus_worker[port_idx],
+            0 // Core 0
+        );
+
+        if (ret != pdPASS) {
+            vQueueDelete(s_modbus_queue[port_idx]);
+            s_modbus_queue[port_idx] = NULL;
+            s_modbus_worker[port_idx] = NULL;
+            return false;
+        }
+    }
+    return true;
+}
 /**
  * @brief Check the port argument of a built-in; raise a script error when it is out of range.
  * @param handle Calling runtime handle.
@@ -65,7 +188,18 @@ static value_t *built_in_modbus_open(ti_handle_t handle, value_t **argv, int arg
     }
 
     // Step 3: open and report the result as text
-    return val_new_string(ModbusMaster_StatusToStr(ModbusMaster_Open((uint8_t)port, (uint32_t)baud, frame)));
+    ModbusMasterStatus_t status = ModbusMaster_Open((uint8_t)port, (uint32_t)baud, frame);
+    if (status != MBM_OK) {
+        return val_new_string(ModbusMaster_StatusToStr(status));
+    }
+
+    // Step 4: start async worker for this port; close port if worker fails to start
+    if (!modbus_worker_start((uint8_t)port)) {
+        ModbusMaster_Close((uint8_t)port);
+        return val_new_string("Failed to start Modbus worker task");
+    }
+
+    return val_new_string("OK");
 }
 
 /**
@@ -145,10 +279,10 @@ static value_t *built_in_modbus_send(ti_handle_t handle, value_t **argv, int arg
         return NULL;
     }
 
-    // Step 2: send and wait for the answer
+    // Step 2: send and wait for the answer asynchronously
     uint8_t buf[MODBUS_MASTER_MAX_RESPONSE];
     size_t len = sizeof(buf);
-    ModbusMasterStatus_t status = ModbusMaster_Send((uint8_t)port, (uint8_t)slave, (uint8_t)function,
+    ModbusMasterStatus_t status = modbus_send_async(handle, (uint8_t)port, (uint8_t)slave, (uint8_t)function,
                                                     (uint16_t)address, (uint16_t)quantity, (uint32_t)timeout_ms,
                                                     buf, &len);
 
