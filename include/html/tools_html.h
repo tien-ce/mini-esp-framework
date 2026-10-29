@@ -31,7 +31,6 @@ a{text-decoration:none;}
 
 <div class='section-header'>Tools</div>
 <a href='/console'><button>Console</button></a>
-<a href='/tien_console'><button>Tien Script Console</button></a>
 <button class='inactive'>Extension Manager</button>
 <a href='manage_file_system'><button>Manage File system</button></a>
 <button class='inactive'>GPIO Viewer</button>

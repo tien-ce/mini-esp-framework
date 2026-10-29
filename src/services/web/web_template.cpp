@@ -433,7 +433,7 @@ void web_begin_telemetry_poll() {
     xSemaphoreGive(telemetryMutex());
 }
 
-/* This function is called when the client call to server to get the telemetries to show into web */
+/* This function is called after all module done with SIG_WEB_POLL signal, it will check what is key is deprecated to remove by set key = '\0'*/
 String web_get_telemetry_json() {
     JsonDocument doc;
 

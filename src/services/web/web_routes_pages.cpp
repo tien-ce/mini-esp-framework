@@ -6,7 +6,6 @@
 #include "html/tools_html.h"
 #include "html/manage_file_system_html.h"
 #include "html/console_html.h"
-#include "html/tien_console_html.h"
 #include "html/ota_html.h"
 #include "html/config_html.h"
 #include "html/config_module_html.h"
@@ -50,12 +49,6 @@ static void handleConsole(AsyncWebServerRequest *request) {
     AsyncWebServerResponse *response = request->beginResponse_P(200, "text/html", CONSOLE_HTML_GZ, sizeof(CONSOLE_HTML_GZ));
     response->addHeader("Content-Encoding", "gzip");
     request->send(response);
-}
-
-/** @brief Handles HTTP GET request for Tien script interpreter console page ("/tien_console"). */
-static void handleTienConsole(AsyncWebServerRequest *request) {
-    if (!web_authenticate(request)) return;
-    request->send(200, "text/html", web_render_template(TIEN_CONSOLE_HTML));
 }
 
 /** @brief Handles HTTP GET request for firmware OTA upgrade page ("/ota"). */
@@ -105,7 +98,6 @@ void register_page_routes(AsyncWebServer *server) {
     server->on("/tools", HTTP_GET, handleTools);
     server->on("/manage_file_system", HTTP_GET, handleManageFileSystem);
     server->on("/console", HTTP_GET, handleConsole);
-    server->on("/tien_console", HTTP_GET, handleTienConsole);
     server->on("/ota", HTTP_GET, handleOta);
     server->on("/config", HTTP_GET, handleConfig);
     server->on("/config-module", HTTP_GET, handleConfigModule);
