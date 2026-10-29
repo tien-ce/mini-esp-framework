@@ -39,9 +39,12 @@ static const char* AVAILABLE_PIN_OPTIONS[] = {
     "I2C SCL",
     "ADC Input",
     "E3FR2C1_IN",
-    "RS485_TX",
-    "RS485_RX",
-    "RS485_DE",
+    "SERIAL1_TX",
+    "SERIAL2_TX",
+    "SERIAL1_RX",
+    "SERIAL2_RX",
+    "SERIAL1_DE",
+    "SERIAL2_DE",
 };
 #define AVAILABLE_PIN_OPTIONS_COUNT (sizeof(AVAILABLE_PIN_OPTIONS) / sizeof(AVAILABLE_PIN_OPTIONS[0]))
 
@@ -59,8 +62,8 @@ static const BoardPinDef BOARD_PINS[] = {
     {15, "GPIO15", "Relay3",false},
     {16, "GPIO16", "Relay4",false},
     /* Default RS485 Pins for esp32-rs485-can*/
-    {17, "GPIO17", "RS485_TX",false},
-    {18, "GPIO18", "RS485_RX",false},
+    {17, "GPIO17", "SERIAL1_TX",false},
+    {18, "GPIO18", "SERIAL1_RX",false},
     {37, "GPIO37", "None", false},
     {38, "GPIO38", "None", false},
     {39, "GPIO39", "None", false},
@@ -94,9 +97,9 @@ static const BoardPinDef BOARD_PINS[] = {
     {15, "GPIO15", "None",        false},
     {16, "GPIO16", "None",        false},
     /* Default RS485 Pins for esp32-rs485-can*/
-    {17, "GPIO17", "RS485_TX",    false},
-    {18, "GPIO18", "RS485_RX",    false},
-    {21, "GPIO21", "RS485_DE",    false},
+    {17, "GPIO17", "SERIAL1_TX",    false},
+    {18, "GPIO18", "SERIAL1_RX",    false},
+    {21, "GPIO21", "SERIAL1_DE",    false},
 };
 #endif
 
