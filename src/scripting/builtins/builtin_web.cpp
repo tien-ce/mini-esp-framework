@@ -1,4 +1,5 @@
 #include <Arduino.h>
+#include "services/wifi/wifi_state.h"
 #include "built_in.h"
 #include "TienInterpreter.h"
 #include "core/core_log.h"
@@ -55,7 +56,7 @@ static value_t *built_in_web_http_get_dict(ti_handle_t handle, value_t **argv, i
         ti_fatal();
     }
 
-    if (CoreState_GetNetwork() != NET_STATE_WIFI_STA) {
+    if (!is_wifi_sta_connected()) {
         value_t *dict_val = val_new_dict();
         val_dict_set(dict_val->dict_val, "code", val_new_int(-1));
         val_dict_set(dict_val->dict_val, "payload", val_new_string("Network Disconnected"));
@@ -101,7 +102,7 @@ static value_t *built_in_web_http_post_dict(ti_handle_t handle, value_t **argv, 
         ti_fatal();
     }
 
-    if (CoreState_GetNetwork() != NET_STATE_WIFI_STA) {
+    if (!is_wifi_sta_connected()) {
         value_t *dict_val = val_new_dict();
         val_dict_set(dict_val->dict_val, "code", val_new_int(-1));
         val_dict_set(dict_val->dict_val, "payload", val_new_string("Network Disconnected"));

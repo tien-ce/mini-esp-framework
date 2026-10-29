@@ -1,4 +1,5 @@
 #include "services/mqtt/mqtt_task.h"
+#include "services/logger/log_task.h"
 #include "core/core_nvs.h"
 #include "core/core_engine.h"
 #include "core/dispatcher.h"
@@ -6,6 +7,7 @@
 #include "core/info.h"
 #include "services/wifi/wifi_task.h"
 #include "config.h"
+#include "cmd.h"
 
 #include <WiFi.h>
 #include <PubSubClient.h>
@@ -104,6 +106,182 @@ static void connectBroker() {
     }
 }
 
+/** @brief Command handler: Gets or sets MQTT publish data topic. */
+static void mqtt_cmd_data_topic(const String &arg) {
+    String cleanVal = arg;
+    cleanVal.trim();
+    while (cleanVal.endsWith(";")) {
+        cleanVal = cleanVal.substring(0, cleanVal.length() - 1);
+        cleanVal.trim();
+    }
+    if (cleanVal.length() > 0) {
+        if (mqttMutex != NULL && xSemaphoreTake(mqttMutex, portMAX_DELAY) == pdTRUE) {
+            mqtt_data_topic = cleanVal;
+            xSemaphoreGive(mqttMutex);
+        } else {
+            mqtt_data_topic = cleanVal;
+        }
+        saveMqttConfig();
+        LOG_INFO("MQTT Data Topic updated to: " + mqtt_data_topic);
+    } else {
+        LOG_INFO("MQTT Data Topic: " + getMqttDataTopic());
+    }
+}
+
+/** @brief Command handler: Gets or sets MQTT RPC topic. */
+static void mqtt_cmd_rpc_topic(const String &arg) {
+    String cleanVal = arg;
+    cleanVal.trim();
+    while (cleanVal.endsWith(";")) {
+        cleanVal = cleanVal.substring(0, cleanVal.length() - 1);
+        cleanVal.trim();
+    }
+    if (cleanVal.length() > 0) {
+        if (mqttMutex != NULL && xSemaphoreTake(mqttMutex, portMAX_DELAY) == pdTRUE) {
+            mqtt_rpc_topic = cleanVal;
+            xSemaphoreGive(mqttMutex);
+        } else {
+            mqtt_rpc_topic = cleanVal;
+        }
+        saveMqttConfig();
+        LOG_INFO("MQTT RPC Topic updated to: " + mqtt_rpc_topic);
+    } else {
+        LOG_INFO("MQTT RPC Topic: " + getMqttRpcTopic());
+    }
+}
+
+/** @brief Command handler: Gets or sets MQTT broker server address. */
+static void mqtt_cmd_server(const String &arg) {
+    String cleanVal = arg;
+    cleanVal.trim();
+    while (cleanVal.endsWith(";")) {
+        cleanVal = cleanVal.substring(0, cleanVal.length() - 1);
+        cleanVal.trim();
+    }
+    if (cleanVal.length() > 0) {
+        if (mqttMutex != NULL && xSemaphoreTake(mqttMutex, portMAX_DELAY) == pdTRUE) {
+            mqtt_server = cleanVal;
+            xSemaphoreGive(mqttMutex);
+        } else {
+            mqtt_server = cleanVal;
+        }
+        saveMqttConfig();
+        LOG_INFO("MQTT Server updated to: " + mqtt_server);
+    } else {
+        LOG_INFO("MQTT Server: " + getMqttServer());
+    }
+}
+
+/** @brief Command handler: Gets or sets MQTT broker port. */
+static void mqtt_cmd_port(const String &arg) {
+    String cleanVal = arg;
+    cleanVal.trim();
+    while (cleanVal.endsWith(";")) {
+        cleanVal = cleanVal.substring(0, cleanVal.length() - 1);
+        cleanVal.trim();
+    }
+    if (cleanVal.length() > 0) {
+        int port = cleanVal.toInt();
+        if (port <= 0 || port > 65535) {
+            LOG_ERROR("Invalid MQTT port: " + cleanVal);
+            return;
+        }
+        if (mqttMutex != NULL && xSemaphoreTake(mqttMutex, portMAX_DELAY) == pdTRUE) {
+            mqtt_port = (uint16_t)port;
+            xSemaphoreGive(mqttMutex);
+        } else {
+            mqtt_port = (uint16_t)port;
+        }
+        saveMqttConfig();
+        LOG_INFO("MQTT Port updated to: " + String(mqtt_port));
+    } else {
+        LOG_INFO("MQTT Port: " + String(getMqttPort()));
+    }
+}
+
+/** @brief Command handler: Gets or sets MQTT username. */
+static void mqtt_cmd_user(const String &arg) {
+    String cleanVal = arg;
+    cleanVal.trim();
+    while (cleanVal.endsWith(";")) {
+        cleanVal = cleanVal.substring(0, cleanVal.length() - 1);
+        cleanVal.trim();
+    }
+    if (cleanVal.length() > 0) {
+        if (mqttMutex != NULL && xSemaphoreTake(mqttMutex, portMAX_DELAY) == pdTRUE) {
+            mqtt_user = cleanVal;
+            xSemaphoreGive(mqttMutex);
+        } else {
+            mqtt_user = cleanVal;
+        }
+        saveMqttConfig();
+        LOG_INFO("MQTT User updated to: " + mqtt_user);
+    } else {
+        LOG_INFO("MQTT User: " + getMqttUser());
+    }
+}
+
+/** @brief Command handler: Gets or sets MQTT password. */
+static void mqtt_cmd_password(const String &arg) {
+    String cleanVal = arg;
+    cleanVal.trim();
+    while (cleanVal.endsWith(";")) {
+        cleanVal = cleanVal.substring(0, cleanVal.length() - 1);
+        cleanVal.trim();
+    }
+    if (cleanVal.length() > 0) {
+        if (mqttMutex != NULL && xSemaphoreTake(mqttMutex, portMAX_DELAY) == pdTRUE) {
+            mqtt_pass = cleanVal;
+            xSemaphoreGive(mqttMutex);
+        } else {
+            mqtt_pass = cleanVal;
+        }
+        saveMqttConfig();
+        LOG_INFO("MQTT Password updated.");
+    } else {
+        LOG_INFO("MQTT Password: " + getMqttPass());
+    }
+}
+
+/** @brief Command handler: Gets or sets MQTT telemetry publish interval in ms. */
+static void mqtt_cmd_interval(const String &arg) {
+    String cleanVal = arg;
+    cleanVal.trim();
+    while (cleanVal.endsWith(";")) {
+        cleanVal = cleanVal.substring(0, cleanVal.length() - 1);
+        cleanVal.trim();
+    }
+    if (cleanVal.length() > 0) {
+        int interval = cleanVal.toInt();
+        if (interval < 500) {
+            LOG_ERROR("MQTT Interval too low (minimum 500ms): " + cleanVal);
+            return;
+        }
+        if (mqttMutex != NULL && xSemaphoreTake(mqttMutex, portMAX_DELAY) == pdTRUE) {
+            mqtt_interval = (uint32_t)interval;
+            xSemaphoreGive(mqttMutex);
+        } else {
+            mqtt_interval = (uint32_t)interval;
+        }
+        saveMqttConfig();
+        LOG_INFO("MQTT Interval updated to: " + String(mqtt_interval) + " ms");
+    } else {
+        LOG_INFO("MQTT Interval: " + String(getMqttInterval()) + " ms");
+    }
+}
+
+/** @brief Command handler: Displays full MQTT configuration and connection status. */
+static void mqtt_cmd_status(const String &arg) {
+    LOG_INFO("--- MQTT Configuration & Status ---");
+    LOG_INFO("Server: " + getMqttServer() + ":" + String(getMqttPort()));
+    LOG_INFO("User: " + getMqttUser());
+    LOG_INFO("Connected: " + String(mqttClient.connected() ? "YES" : "NO"));
+    LOG_INFO("Data Topic: " + getMqttDataTopic());
+    LOG_INFO("RPC Topic: " + getMqttRpcTopic());
+    LOG_INFO("Interval: " + String(getMqttInterval()) + " ms");
+    LOG_INFO("------------------------------------");
+}
+
 
 /* -------------------------------------------------------------------------- */
 /*                              PUBLIC CONFIG APIS                            */
@@ -150,9 +328,36 @@ bool mqtt_init() {
  * @param[in] pvParameters Unused.
  */
 void vMqttTask(void *pvParameters) {
-    waiting_on_event(NETWORK_EVENT, NET_STATE_WIFI_STA, portMAX_DELAY);
+    core_state_wait(g_wifi_state_group, (uint8_t)WIFI_STATE_STA, portMAX_DELAY);
     
     loadMqttConfig();
+
+    // Register MQTT CLI / Web commands
+    register_cmd(CMD_MQTT_DATA_TOPIC, mqtt_cmd_data_topic);
+    register_cmd("MQTT_DATA_TOPIC", mqtt_cmd_data_topic);
+    register_cmd("MQTT_TOPIC", mqtt_cmd_data_topic);
+
+    register_cmd(CMD_MQTT_RPC_TOPIC, mqtt_cmd_rpc_topic);
+    register_cmd("DATA_RPC", mqtt_cmd_rpc_topic);
+    register_cmd("MQTT_RPC_TOPIC", mqtt_cmd_rpc_topic);
+    register_cmd("MQTT_RPC", mqtt_cmd_rpc_topic);
+    register_cmd("RPC_TOPIC", mqtt_cmd_rpc_topic);
+
+    register_cmd(CMD_MQTT_SERVER, mqtt_cmd_server);
+    register_cmd("MQTT_HOST", mqtt_cmd_server);
+    register_cmd("BROKER", mqtt_cmd_server);
+
+    register_cmd(CMD_MQTT_PORT, mqtt_cmd_port);
+
+    register_cmd(CMD_MQTT_USER, mqtt_cmd_user);
+    register_cmd("MQTT_USERNAME", mqtt_cmd_user);
+
+    register_cmd(CMD_MQTT_PASSWORD, mqtt_cmd_password);
+    register_cmd("MQTT_PASS", mqtt_cmd_password);
+
+    register_cmd(CMD_MQTT_INTERVAL, mqtt_cmd_interval);
+
+    register_cmd(CMD_MQTT_STATUS, mqtt_cmd_status);
 
     TickType_t xLastWakeTime = xTaskGetTickCount();
 
@@ -232,3 +437,21 @@ template bool mqtt_add_telemetry<char*>(const String&, char*);
 template bool mqtt_add_telemetry<const char*>(const String&, const char*);
 template bool mqtt_add_telemetry<String>(const String&, String);
 template bool mqtt_add_telemetry<bool>(const String&, bool);
+
+bool is_mqtt_connected() {
+    return mqttClient.connected();
+}
+
+void mqtt_task_start() {
+    mqtt_init();
+    xTaskCreatePinnedToCore(
+        vMqttTask,
+        "MqttTask",
+        6144,
+        NULL,
+        3,
+        NULL,
+        1
+    );
+}
+
