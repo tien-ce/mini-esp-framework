@@ -1,9 +1,9 @@
-#include "services/wifi/wifi_task.h"
 #include "core/dispatcher.h"
 #include "core/core_log.h"
 #include "core/core_engine.h"
 #include "config.h"
-#include "cmd.h"
+#include "services/wifi/wifi_task.h"
+#include "services/logger/log_task.h"
 #include <ESP32Ping.h>
 #include <semphr.h>
 
@@ -119,7 +119,7 @@ static void diagnose_connection_issues(IPAddress targetIP) {
  * @brief WiFi station disconnect event callback handler.
  */
 static void WiFiStationDisconnected(WiFiEvent_t event, WiFiEventInfo_t info) {
-    CoreState_SetNetwork(NET_STATE_DISCONNECTED);
+    wifi_state_set(WIFI_STATE_DISCONNECTED);
     LOG_WARNING("WiFi disconnected! Reason: " + String(info.wifi_sta_disconnected.reason));
 }
 
@@ -135,7 +135,7 @@ static void WiFiStationDisconnected(WiFiEvent_t event, WiFiEventInfo_t info) {
  */
 static void setup_wifi() {
     /* Update state of network is connecting */
-    CoreState_SetNetwork(NET_STATE_CONNECTING);
+    wifi_state_set(WIFI_STATE_CONNECTING);
     WiFi.mode(WIFI_STA);
     
     String clientID = getWifiClientID();
@@ -184,7 +184,7 @@ static void setup_wifi() {
     }
 
     if (WiFi.status() == WL_CONNECTED && WiFi.localIP() != IPAddress(0, 0, 0, 0)) {
-        CoreState_SetNetwork(NET_STATE_WIFI_STA);
+        wifi_state_set(WIFI_STATE_STA);
         dispatch_signal(SIG_WIFI_CONNECTED); 
         randomSeed(micros());
         LOG_INFO("WiFi connected successfully!");
@@ -203,7 +203,7 @@ static void setup_wifi() {
         targetServer.fromString(getWifiGateway());
         diagnose_connection_issues(targetServer);
     } else {
-        CoreState_SetNetwork(NET_STATE_DISCONNECTED);
+        wifi_state_set(WIFI_STATE_DISCONNECTED);
         LOG_ERROR("WiFi connection FAILED!");
         LOG_ERROR("  -> Diagnostic: Verify SSID, Password, and signal strength (RSSI).");
     }
@@ -502,13 +502,38 @@ int get_wifi_rssi() {
     return WiFi.RSSI();
 }
 
+/** @brief Formats a live address as text, empty when not connected or the address is unset. */
+static String live_ip_text(const IPAddress &ip) {
+    if (WiFi.status() != WL_CONNECTED || ip == IPAddress(0, 0, 0, 0)) {
+        return String("");
+    }
+    return ip.toString();
+}
+
+String get_wifi_local_ip() {
+    // No lease yet: report empty instead of "0.0.0.0"
+    return live_ip_text(WiFi.localIP());
+}
+
+String get_wifi_gateway_ip() {
+    return live_ip_text(WiFi.gatewayIP());
+}
+
+String get_wifi_subnet_mask() {
+    return live_ip_text(WiFi.subnetMask());
+}
+
+String get_wifi_dns_ip() {
+    return live_ip_text(WiFi.dnsIP());
+}
+
 /**
  * @brief FreeRTOS task quản lý cấu hình WiFi và điều phối máy trạng thái tự động kết nối lại (Auto-Reconnect).
  * @param[in] pvParameters Tham số tác vụ FreeRTOS (không sử dụng).
  */
 void vWifiTask(void *pvParameters) {
-    /* Wait until log initialized */
-    waiting_on_event(SYSTEM_EVENT, SYS_NORMAL, portMAX_DELAY);
+    /* Wait until system is in normal running state */
+    core_state_wait(g_system_state_group, (uint8_t)SYS_NORMAL, portMAX_DELAY);
     loadWifiConfig();
 
     // Register WiFi CLI / Web commands
@@ -551,9 +576,9 @@ void vWifiTask(void *pvParameters) {
          */
         if (!is_wifi_connected()) {
             unsigned long currentMillis = millis();
-            CoreState_SetNetwork(NET_STATE_DISCONNECTED);
+            wifi_state_set(WIFI_STATE_DISCONNECTED);
             if (currentMillis - previousWifiMillis >= wifiReconnectInterval) {
-                CoreState_SetNetwork(NET_STATE_CONNECTING);
+                wifi_state_set(WIFI_STATE_CONNECTING);
                 dispatch_signal(SIG_WIFI_DISCONNECTED);
                 LOG_WARNING("WiFi DISCONNECTED! Reconnecting...");
                 WiFi.disconnect();
@@ -562,7 +587,7 @@ void vWifiTask(void *pvParameters) {
                 WiFi.begin(currentSsid.c_str(), currentPass.c_str());
                 vTaskDelay(pdMS_TO_TICKS(500));
                 if (is_wifi_connected()) {
-                    CoreState_SetNetwork(NET_STATE_WIFI_STA);
+                    wifi_state_set(WIFI_STATE_STA);
                     LOG_INFO("WIFI Reconnect Success");
                 }
                 else {
@@ -571,17 +596,31 @@ void vWifiTask(void *pvParameters) {
                 previousWifiMillis = currentMillis;
             }
         }
-        else if (CoreState_GetNetwork() != NET_STATE_WIFI_STA) {
+        else if (get_wifi_state() != WIFI_STATE_STA) {
             // Link came back after the 500 ms check above (or by the driver's own auto-reconnect):
             // resynchronize the shared network state, otherwise it stays DISCONNECTED/CONNECTING forever
             if (WiFi.localIP() != IPAddress(0, 0, 0, 0)) {
-                CoreState_SetNetwork(NET_STATE_WIFI_STA);
+                wifi_state_set(WIFI_STATE_STA);
                 dispatch_signal(SIG_WIFI_CONNECTED);
                 LOG_INFO("WiFi link restored. IP: " + WiFi.localIP().toString());
             }
         }
         vTaskDelay(pdMS_TO_TICKS(1000));
     }
+}
+
+void wifi_task_start(void) {
+    // Create state at start, not in VTask avoid the wifi depended tasks initilized sooner
+    wifi_state_init();
+    xTaskCreatePinnedToCore(
+        vWifiTask,
+        "WifiTask",
+        4096,
+        NULL,
+        3,
+        NULL,
+        1
+    );
 }
 
 
