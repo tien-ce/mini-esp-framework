@@ -295,5 +295,3 @@ void tien_init(void) {
     register_cmd("tien", tien_run_cmd);
     register_cmd("tien_stop", tien_stop_cmd);
 }
-
-
