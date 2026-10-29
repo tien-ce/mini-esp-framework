@@ -344,4 +344,5 @@ void register_fs_routes(AsyncWebServer *server) {
     server->on("/api/fs/save", HTTP_POST, handleFSSaveRequest, NULL, handleFSSaveBody);
     server->on("/api/fs/delete", HTTP_POST, handleFSDeleteRequest);
     server->on("/api/fs/mkdir", HTTP_POST, handleFSMkdirRequest);
+    server->on("/api/fs/rename", HTTP_POST, handleFSRenameRequest);
 }

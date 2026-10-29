@@ -39,13 +39,17 @@ static void handleTools(AsyncWebServerRequest *request) {
 /** @brief Handles HTTP GET request for LittleFS file system manager ("/manage_file_system" / "/tools/manage_file_system"). */
 static void handleManageFileSystem(AsyncWebServerRequest *request) {
     if (!web_authenticate(request)) return;
-    request->send(200, "text/html", (const uint8_t*)MANAGE_FILE_SYSTEM_HTML, sizeof(MANAGE_FILE_SYSTEM_HTML) - 1);
+    AsyncWebServerResponse *response = request->beginResponse_P(200, "text/html", MANAGE_FILE_SYSTEM_HTML_GZ, sizeof(MANAGE_FILE_SYSTEM_HTML_GZ));
+    response->addHeader("Content-Encoding", "gzip");
+    request->send(response);
 }
 
 /** @brief Handles HTTP GET request for web console terminal page ("/console"). */
 static void handleConsole(AsyncWebServerRequest *request) {
     if (!web_authenticate(request)) return;
-    request->send(200, "text/html", web_render_template(CONSOLE_HTML));
+    AsyncWebServerResponse *response = request->beginResponse_P(200, "text/html", CONSOLE_HTML_GZ, sizeof(CONSOLE_HTML_GZ));
+    response->addHeader("Content-Encoding", "gzip");
+    request->send(response);
 }
 
 /** @brief Handles HTTP GET request for Tien script interpreter console page ("/tien_console"). */
