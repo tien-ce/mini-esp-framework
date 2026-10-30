@@ -426,6 +426,25 @@ void updateElementValue(const String& key, const String& newValue) {
     }
 }
 
+/* Append s as a quoted JSON string, escaping quotes, backslashes and control characters */
+static void json_append_string(String &out, const char *s) {
+    out += '"';
+    for (; *s; s++) {
+        unsigned char c = (unsigned char)*s;
+        if (c == '"' || c == '\\') {
+            out += '\\';
+            out += (char)c;
+        } else if (c < 0x20) {
+            char buf[7];
+            snprintf(buf, sizeof(buf), "\\u%04x", c);
+            out += buf;
+        } else {
+            out += (char)c;
+        }
+    }
+    out += '"';
+}
+
 /* Called at the start of each poll: ages are counted in polls */
 void web_begin_telemetry_poll() {
     xSemaphoreTake(telemetryMutex(), portMAX_DELAY);
@@ -435,9 +454,12 @@ void web_begin_telemetry_poll() {
 
 /* This function is called after all module done with SIG_WEB_POLL signal, it will check what is key is deprecated to remove by set key = '\0'*/
 String web_get_telemetry_json() {
-    JsonDocument doc;
+    String json;
+    json.reserve(256);
+    json += '{';
 
     xSemaphoreTake(telemetryMutex(), portMAX_DELAY);
+    bool first = true;
     for (int i = 0; i < TELEMETRY_MAX_KEYS; i++) {
         if (s_telemetry[i].key[0] == '\0') continue;
 
@@ -446,15 +468,14 @@ String web_get_telemetry_json() {
             s_telemetry[i].key[0] = '\0';
             continue;
         }
-        doc[s_telemetry[i].key] = s_telemetry[i].value;
+        if (!first) json += ',';
+        first = false;
+        json_append_string(json, s_telemetry[i].key);
+        json += ':';
+        json_append_string(json, s_telemetry[i].value);
     }
     xSemaphoreGive(telemetryMutex());
 
-    String json;
-    if (doc.isNull()) {
-        json = "{}";
-    } else {
-        serializeJson(doc, json);
-    }
+    json += '}';
     return json;
 }
