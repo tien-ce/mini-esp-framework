@@ -4,13 +4,6 @@
 #include <Arduino.h>
 
 /**
- * @brief Renders an HTML template by expanding every known %PLACEHOLDER% in a single scan.
- * @param templateStr NUL-terminated template text (e.g. a PROGMEM page).
- * @return The rendered page, or an empty String on invalid input or allocation failure.
- */
-String web_render_template(const char* templateStr);
-
-/**
  * @brief Writes the GPIO pin mapping as JSON (shared option list + one entry per board pin).
  * @param out Destination stream, typically an AsyncResponseStream.
  */
@@ -18,14 +11,6 @@ void web_build_gpio_json(Print &out);
 
 /** @brief Updates dynamic telemetry key-value pair for HTTP polling responses. */
 void updateElementValue(const String& key, const String& newValue);
-
-/** @brief Legacy helper for registering table elements. */
-[[deprecated("registerElement() is outdated and does nothing. UI elements are rendered dynamically via HTTP Polling.")]]
-uint8_t registerElement(const String& label, const String& unit, const String& initialValue);
-
-/** @brief Legacy helper for updating element value by ID. */
-[[deprecated("updateElementValue() is outdated and does nothing. Use updateElementValue to register key-value pairs.")]]
-void updateElementValue(uint8_t id, const String& newValue);
 
 /** @brief Starts a telemetry poll: call once per HTTP poll, before the SIG_WEB_POLL dispatch. */
 void web_begin_telemetry_poll();

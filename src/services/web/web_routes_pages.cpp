@@ -1,6 +1,5 @@
 #include "services/web/web_routes_pages.h"
 #include "services/web/web_auth.h"
-#include "services/web/web_template.h"
 #include "html/main_html.h"
 #include "html/info_html.h"
 #include "html/tools_html.h"
@@ -17,69 +16,24 @@
 /*                              STATIC FUNCTIONS                              */
 /* -------------------------------------------------------------------------- */
 
-/** @brief Handles HTTP GET request for the root dashboard URL ("/"). */
-static void handleRoot(AsyncWebServerRequest *request) {
+/** @brief Sends a gzip-compressed PROGMEM page after the auth check. */
+static void sendGzPage(AsyncWebServerRequest *request, const uint8_t *data, size_t len) {
     if (!web_authenticate(request)) return;
-    request->send(200, "text/html", web_render_template(MAIN_HTML));
-}
-
-/** @brief Handles HTTP GET request for the system information page ("/info"). */
-static void handleInfo(AsyncWebServerRequest *request) {
-    if (!web_authenticate(request)) return;
-    request->send(200, "text/html", web_render_template(INFO_HTML));
-}
-
-/** @brief Handles HTTP GET request for the tools overview page ("/tools"). */
-static void handleTools(AsyncWebServerRequest *request) {
-    if (!web_authenticate(request)) return;
-    request->send(200, "text/html", web_render_template(TOOLS_HTML));
-}
-
-/** @brief Handles HTTP GET request for LittleFS file system manager ("/manage_file_system" / "/tools/manage_file_system"). */
-static void handleManageFileSystem(AsyncWebServerRequest *request) {
-    if (!web_authenticate(request)) return;
-    AsyncWebServerResponse *response = request->beginResponse_P(200, "text/html", MANAGE_FILE_SYSTEM_HTML_GZ, sizeof(MANAGE_FILE_SYSTEM_HTML_GZ));
+    AsyncWebServerResponse *response = request->beginResponse_P(200, "text/html", data, len);
     response->addHeader("Content-Encoding", "gzip");
     request->send(response);
 }
 
-/** @brief Handles HTTP GET request for web console terminal page ("/console"). */
-static void handleConsole(AsyncWebServerRequest *request) {
-    if (!web_authenticate(request)) return;
-    AsyncWebServerResponse *response = request->beginResponse_P(200, "text/html", CONSOLE_HTML_GZ, sizeof(CONSOLE_HTML_GZ));
-    response->addHeader("Content-Encoding", "gzip");
-    request->send(response);
-}
-
-/** @brief Handles HTTP GET request for firmware OTA upgrade page ("/ota"). */
-static void handleOta(AsyncWebServerRequest *request) {
-    if (!web_authenticate(request)) return;
-    request->send(200, "text/html", web_render_template(OTA_HTML));
-}
-
-/** @brief Handles HTTP GET request for general configuration menu page ("/config"). */
-static void handleConfig(AsyncWebServerRequest *request) {
-    if (!web_authenticate(request)) return;
-    request->send(200, "text/html", web_render_template(CONFIG_HTML));
-}
-
-/** @brief Handles HTTP GET request for GPIO pin mapping configuration page ("/config-module"). */
-static void handleConfigModule(AsyncWebServerRequest *request) {
-    if (!web_authenticate(request)) return;
-    request->send(200, "text/html", web_render_template(CONFIG_MODULE_HTML));
-}
-
-/** @brief Handles HTTP GET request for WiFi configuration page ("/config-wifi"). */
-static void handleConfigWifi(AsyncWebServerRequest *request) {
-    if (!web_authenticate(request)) return;
-    request->send(200, "text/html", web_render_template(CONFIG_WIFI_HTML));
-}
-
-/** @brief Handles HTTP GET request for MQTT broker configuration page ("/config-mqtt"). */
-static void handleConfigMqtt(AsyncWebServerRequest *request) {
-    if (!web_authenticate(request)) return;
-    request->send(200, "text/html", web_render_template(CONFIG_MQTT_HTML));
-}
+static void handleRoot(AsyncWebServerRequest *request)             { sendGzPage(request, MAIN_HTML_GZ, sizeof(MAIN_HTML_GZ)); }
+static void handleInfo(AsyncWebServerRequest *request)             { sendGzPage(request, INFO_HTML_GZ, sizeof(INFO_HTML_GZ)); }
+static void handleTools(AsyncWebServerRequest *request)            { sendGzPage(request, TOOLS_HTML_GZ, sizeof(TOOLS_HTML_GZ)); }
+static void handleOta(AsyncWebServerRequest *request)              { sendGzPage(request, OTA_HTML_GZ, sizeof(OTA_HTML_GZ)); }
+static void handleConfig(AsyncWebServerRequest *request)           { sendGzPage(request, CONFIG_HTML_GZ, sizeof(CONFIG_HTML_GZ)); }
+static void handleConfigModule(AsyncWebServerRequest *request)     { sendGzPage(request, CONFIG_MODULE_HTML_GZ, sizeof(CONFIG_MODULE_HTML_GZ)); }
+static void handleConfigWifi(AsyncWebServerRequest *request)       { sendGzPage(request, CONFIG_WIFI_HTML_GZ, sizeof(CONFIG_WIFI_HTML_GZ)); }
+static void handleConfigMqtt(AsyncWebServerRequest *request)       { sendGzPage(request, CONFIG_MQTT_HTML_GZ, sizeof(CONFIG_MQTT_HTML_GZ)); }
+static void handleManageFileSystem(AsyncWebServerRequest *request) { sendGzPage(request, MANAGE_FILE_SYSTEM_HTML_GZ, sizeof(MANAGE_FILE_SYSTEM_HTML_GZ)); }
+static void handleConsole(AsyncWebServerRequest *request)          { sendGzPage(request, CONSOLE_HTML_GZ, sizeof(CONSOLE_HTML_GZ)); }
 
 /** @brief Fallback handler for unmapped routes and HTTP 404 Not Found errors. */
 static void handleNotFound(AsyncWebServerRequest *request) {

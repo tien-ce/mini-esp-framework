@@ -3,8 +3,8 @@
 
 #include <Arduino.h>
 
-// ./html_test/file_system.html.gz: 57688 bytes of HTML, stored gzip-compressed (16714 bytes).
-// Send it with Content-Encoding: gzip; the browser unpacks it.
+// Generated from html_test/file_system.html by html_test/build.js: 57688 bytes of HTML, stored gzip-compressed (16714 bytes).
+// Send it with Content-Encoding: gzip; the browser unpacks it. Do not edit by hand.
 const uint8_t MANAGE_FILE_SYSTEM_HTML_GZ[] PROGMEM = {
   0x1f, 0x8b, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0x0a, 0xcd, 0xbd, 0xdb, 0x72, 0xdb, 0xc8,
   0x92, 0x28, 0xfa, 0xde, 0x5f, 0x01, 0xc1, 0x6e, 0x1a, 0x30, 0x8b, 0x10, 0x49, 0x5d, 0x0d, 0x0a,

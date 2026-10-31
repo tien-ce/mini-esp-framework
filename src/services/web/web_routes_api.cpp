@@ -4,6 +4,7 @@
 #include "services/wifi/wifi_task.h"
 #include "services/mqtt/mqtt_task.h"
 #include "core/pin_config.h"
+#include "core/info.h"
 #include "core/dispatcher.h"
 #include "core/core_log.h"
 #include "services/logger/log_task.h"
@@ -217,6 +218,30 @@ static void handleStats(AsyncWebServerRequest *request) {
     request->send(200, "application/json", json);
 }
 
+/** @brief Handles HTTP GET request for fixed device facts that do not change until the next boot ("/api/device"). */
+static void handleDevice(AsyncWebServerRequest *request) {
+    if (!web_authenticate(request)) return;
+
+    JsonDocument doc;
+    doc["chip"] = esp_info_get_chip_short();
+    doc["model"] = esp_info_get_model();
+    doc["mac"] = esp_info_get_mac_str();
+
+    // Prefer the configured client id, fall back to "esp-mini-framework-<MAC>"
+    String host = getWifiClientID();
+    if (host.length() == 0) host = String("esp-mini-framework-") + esp_info_get_mac_str();
+    doc["host"] = host;
+
+    doc["fw_version"] = FW_VERSION_STR;
+    doc["build_date"] = __DATE__ " " __TIME__;
+    doc["sdk_version"] = esp_info_get_sdk_version();
+    doc["flash_size"] = esp_info_get_flash_size();
+
+    String json;
+    serializeJson(doc, json);
+    request->send(200, "application/json", json);
+}
+
 /** @brief Handles HTTP POST form submission for complete WiFi and Static IP settings ("/saveWifi"). */
 static void handleSaveWifi(AsyncWebServerRequest *request) {
     if (!web_authenticate(request)) return;
@@ -311,5 +336,6 @@ void register_api_routes(AsyncWebServer *server) {
     server->on("/api/config/wifi", HTTP_GET, handleConfigWifi);
     server->on("/api/config/mqtt", HTTP_GET, handleConfigMqtt);
     server->on("/stats", HTTP_GET, handleStats);
+    server->on("/api/device", HTTP_GET, handleDevice);
 }
 
