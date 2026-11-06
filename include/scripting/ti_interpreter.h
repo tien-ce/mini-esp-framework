@@ -6,7 +6,6 @@
 #include <freertos/task.h>
 #include <vector>
 #include "TienInterpreter.h"
-#include "include/ti_runtime.h"
 typedef struct {
     char name[32]; /* Name of script used to manage */
     ti_handle_t handle;    /* runtime handle used to stop task safely (stale handles are rejected) */

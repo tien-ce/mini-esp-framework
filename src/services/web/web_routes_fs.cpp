@@ -22,6 +22,7 @@ struct UploadContext {
     }
 };
 
+#ifdef SYSTEM_USES_PSRAM
 // Custom Allocator forcing all internal allocations to PSRAM
 struct PsramAllocator : ArduinoJson::Allocator {
     void* allocate(size_t size) override {
@@ -35,7 +36,8 @@ struct PsramAllocator : ArduinoJson::Allocator {
     }
 };
 // Global or static instance of the allocator
-PsramAllocator psramAlloc;
+static PsramAllocator psramAlloc;
+#endif
 /* -------------------------------------------------------------------------- */
 /*                              STATIC FUNCTIONS                              */
 /* -------------------------------------------------------------------------- */
