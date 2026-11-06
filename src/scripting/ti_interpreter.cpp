@@ -1,10 +1,10 @@
 #include "scripting/ti_interpreter.h"
+#include "config.h"
 #include "core/core_log.h"
 #include "services/logger/log_task.h"
 #include "core/file_system.h"
 #include "built_in.h"
 #include "TienInterpreter.h"
-#include "include/ti_runtime.h"
 #include "built_in.h"
 #include <LittleFS.h>
 #include <HTTPClient.h>
@@ -286,6 +286,12 @@ void tien_init(void) {
     ti_register_log(tien_log_callback);
     ti_register_fatal(tien_fatal_callback);
 
+    #ifdef SYSTEM_USES_PSRAM
+    // If use psram, run ti script on ps ram (runtime check: the build flag does not prove the chip exists)
+    if (psramFound()) {
+        ti_register_allocator(ps_malloc, free, ps_realloc);
+    }
+    #endif
     builtins_init();
 
     register_cmd("tien", tien_run_cmd);
