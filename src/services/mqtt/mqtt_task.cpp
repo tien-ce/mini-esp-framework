@@ -10,8 +10,10 @@
 #include "cmd.h"
 
 #include <WiFi.h>
-#include <PubSubClient.h>
 #include <semphr.h>
+
+#ifdef USE_MQTT
+#include <PubSubClient.h>
 
 /* -------------------------------------------------------------------------- */
 /*                              STATIC VARIABLES                              */
@@ -455,3 +457,41 @@ void mqtt_task_start() {
     );
 }
 
+#else //USE_MQTT
+
+/* -------------------------------------------------------------------------- */
+/*              MQTT DISABLED: default returns, no task, no commands          */
+/* -------------------------------------------------------------------------- */
+
+String getMqttServer() { return String(); }
+uint16_t getMqttPort() { return 0; }
+String getMqttUser() { return String(); }
+String getMqttPass() { return String(); }
+uint32_t getMqttInterval() { return 0; }
+String getMqttDataTopic() { return String(); }
+String getMqttRpcTopic() { return String(); }
+
+void updateMqttConfig(const String &server, uint16_t port, const String &user,
+                      const String &pass, uint32_t interval, const String &dataTopic,
+                      const String &rpcTopic) {}
+
+bool mqtt_init() { return false; }
+
+template <typename T>
+bool mqtt_add_telemetry(const String &key, T value) { return false; }
+
+template bool mqtt_add_telemetry<int>(const String&, int);
+template bool mqtt_add_telemetry<float>(const String&, float);
+template bool mqtt_add_telemetry<double>(const String&, double);
+template bool mqtt_add_telemetry<char*>(const String&, char*);
+template bool mqtt_add_telemetry<const char*>(const String&, const char*);
+template bool mqtt_add_telemetry<String>(const String&, String);
+template bool mqtt_add_telemetry<bool>(const String&, bool);
+
+bool is_mqtt_connected() { return false; }
+
+void mqtt_task_start() {}
+
+void vMqttTask(void *pvParameters) { vTaskDelete(NULL); }
+
+#endif //USE_MQTT
