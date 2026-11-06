@@ -207,14 +207,44 @@ static void handleConfigMqtt(AsyncWebServerRequest *request) {
 static void handleStats(AsyncWebServerRequest *request) {
     if (!web_authenticate(request)) return;
 
-    String json = "{";
-    json += "\"uptime\":" + String(millis() / 1000) + ",";
-    json += "\"freeHeap\":" + String(ESP.getFreeHeap()) + ",";
-    json += "\"ip\":\"" + WiFi.localIP().toString() + "\",";
-    json += "\"gw\":\"" + WiFi.gatewayIP().toString() + "\",";
-    json += "\"mask\":\"" + WiFi.subnetMask().toString() + "\",";
-    json += "\"dns1\":\"" + WiFi.dnsIP().toString() + "\"";
-    json += "}";
+    JsonDocument doc;
+    doc["uptime"] = esp_info_get_uptime_sec();
+    doc["freeHeap"] = esp_info_get_free_heap();
+    doc["totalHeap"] = esp_info_get_total_heap();
+    doc["ip"] = WiFi.localIP().toString();
+    doc["gw"] = WiFi.gatewayIP().toString();
+    doc["mask"] = WiFi.subnetMask().toString();
+    doc["dns1"] = WiFi.dnsIP().toString();
+
+    // Heap health: the lowest free level ever seen and the largest contiguous block (fragmentation)
+    doc["minFreeHeap"] = esp_info_get_min_free_heap();
+    doc["maxAllocHeap"] = esp_info_get_max_alloc_heap();
+    doc["chipTemp"] = esp_info_get_chip_temp();
+
+    // Wi-Fi link details are null while there is no link
+    if (is_wifi_connected()) {
+        doc["rssi"] = get_wifi_rssi();
+        doc["ssid"] = WiFi.SSID();
+        doc["channel"] = WiFi.channel();
+    } else {
+        doc["rssi"] = nullptr;
+        doc["ssid"] = nullptr;
+        doc["channel"] = nullptr;
+    }
+    doc["mqttConnected"] = is_mqtt_connected();
+
+    // Both PSRAM keys are always sent so the page can show "free / total"; null means unavailable
+    // (build without SYSTEM_USES_PSRAM or chip not detected)
+    if (esp_info_has_psram()) {
+        doc["freePsram"] = esp_info_get_free_psram();
+        doc["totalPsram"] = esp_info_get_total_psram();
+    } else {
+        doc["freePsram"] = nullptr;
+        doc["totalPsram"] = nullptr;
+    }
+
+    String json;
+    serializeJson(doc, json);
     request->send(200, "application/json", json);
 }
 
@@ -232,6 +262,7 @@ static void handleDevice(AsyncWebServerRequest *request) {
     if (host.length() == 0) host = String("esp-mini-framework-") + esp_info_get_mac_str();
     doc["host"] = host;
 
+    doc["reset_reason"] = esp_info_get_reset_reason();
     doc["fw_version"] = FW_VERSION_STR;
     doc["build_date"] = __DATE__ " " __TIME__;
     doc["sdk_version"] = esp_info_get_sdk_version();

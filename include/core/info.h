@@ -41,6 +41,18 @@ uint32_t esp_info_get_total_heap(void);
 /** @brief Gets the lowest free heap size seen since boot, in bytes. */
 uint32_t esp_info_get_min_free_heap(void);
 
+/** @brief Gets the largest contiguous free block of internal RAM in bytes (PSRAM excluded; low value = fragmented heap). */
+uint32_t esp_info_get_max_alloc_heap(void);
+
+/** @brief Gets the internal chip temperature in degrees Celsius. */
+float esp_info_get_chip_temp(void);
+
+/** @brief Gets why the last reset happened ("POWERON", "BROWNOUT", "PANIC", "TASK_WDT", "SOFTWARE", ...). */
+const char* esp_info_get_reset_reason(void);
+
+/** @brief True when the firmware is built with PSRAM support (SYSTEM_USES_PSRAM) and the PSRAM was found at boot. */
+bool esp_info_has_psram(void);
+
 /** @brief Gets free PSRAM in bytes (0 when the board has none). */
 uint32_t esp_info_get_free_psram(void);
 
