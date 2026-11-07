@@ -10,6 +10,8 @@
 #define CMD_RESTART         "ESP32_RESTART"
 #define CMD_BACKLOG         "BACKLOG"
 #define CMD_RULE            "RULE"
+#define CMD_CRASH_TEST      "CRASH_TEST"
+#define CMD_CRASH_TYPES     "CRASH_TYPES"
 
 // ============================================================================
 // 2. WIFI COMMANDS

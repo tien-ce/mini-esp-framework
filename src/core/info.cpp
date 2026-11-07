@@ -18,6 +18,21 @@ static esp_device_info_t s_device_info = {
     false
 };
 
+/*
+ * The linker puts .rodata_custom_desc right after esp_app_desc_t, so this lands at
+ * FW_DESC_BIN_OFFSET of firmware.bin. "used" keeps it even if no code reads it
+ * (--gc-sections would drop it otherwise).
+ */
+static const fw_desc_t s_fw_desc __attribute__((section(".rodata_custom_desc"), used)) = {
+    FW_DESC_MAGIC,
+    FW_DESC_NAME,
+    FW_VERSION_STR,
+    BOARD_NAME
+};
+
+/* Room for the NUL: OTA compares the field as a string */
+static_assert(sizeof(BOARD_NAME) <= FW_DESC_BOARD_LEN, "BOARD_NAME is too long for fw_desc_t.board");
+
 /* -------------------------------------------------------------------------- */
 /*                              STATIC FUNCTIONS                              */
 /* -------------------------------------------------------------------------- */
@@ -87,6 +102,10 @@ const char* esp_info_get_mac_str(void) {
 
 const char* esp_info_get_fw_version(void) {
     return FW_VERSION_STR;
+}
+
+const fw_desc_t* esp_info_get_fw_desc(void) {
+    return &s_fw_desc;
 }
 
 uint32_t esp_info_get_uptime_sec(void) {

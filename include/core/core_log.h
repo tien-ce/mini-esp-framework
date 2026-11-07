@@ -97,6 +97,21 @@ void core_log_print(const String &msg, LogLevel level = LOG_LEVEL_INFO);
  */
 void core_log_register_cb(LogOutputCallback cb);
 
+/** @brief Size in bytes of the log history ring kept in RTC no-init memory (power of 2). */
+#define CORE_LOG_HISTORY_SIZE 2048
+
+/**
+ * @brief Copies the recent log history (oldest line first) into a buffer.
+ *
+ * The history survives software and panic reboots, so right after a crash it still
+ * holds the last lines logged before it. A "----- boot -----" line marks each start.
+ *
+ * @param out  Destination buffer, NUL-terminated on return.
+ * @param size Size of out; CORE_LOG_HISTORY_SIZE + 1 holds the whole history.
+ * @return Number of characters written (excluding the NUL).
+ */
+size_t core_log_history_read(char *out, size_t size);
+
 /*---- LOGGING MACROS ----*/
 /*
  * These pass the message straight through to core_log_print() with NO

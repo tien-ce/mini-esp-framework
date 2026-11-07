@@ -2,6 +2,7 @@
 #define PIN_CONFIG_H
 
 #include <Arduino.h>
+#include "board.h"
 
 /**
  * @file pin_config.h
@@ -55,7 +56,7 @@ struct BoardPinDef {
     bool isFixed;
 };
 
-#if defined(BOARD_ESP32S3_PLC_MINI)
+#if BOARD == BOARD_PLC_MINI
 static const BoardPinDef BOARD_PINS[] = {
     {6, "GPIO6", "Relay1",false},
     {7, "GPIO7", "Relay2",false},
@@ -78,7 +79,7 @@ static const BoardPinDef BOARD_PINS[] = {
     {48, "GPIO48", "None", false},
     {49, "GPIO49", "None", false},
 };
-#elif defined(BOARD_ESP32S3_RS485_CAN)
+#elif BOARD == BOARD_RS485_CAN
 static const BoardPinDef BOARD_PINS[] = {
     {0,  "GPIO0",  "None",        false},
     {1,  "GPIO1",  "None",        false},

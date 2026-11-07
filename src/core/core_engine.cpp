@@ -3,6 +3,7 @@
 #include "core/pin_config.h"
 #include "core/dispatcher.h"
 #include "core/core_log.h"
+#include "core/reset_log.h"
 
 /* -------------------------------------------------------------------------- */
 /*                              GLOBAL VARIABLES                              */
@@ -54,6 +55,9 @@ static bool CoreState_Init(void) {
     // 1. Initialize Serial & Logging hardware immediately for early boot visibility
     core_log_init();
 
+    // Register the panic hook early so crashes during the rest of boot are captured too
+    reset_log_init();
+
     // 2. Allocate System State synchronization primitives
     s_system_mode_mutex = xSemaphoreCreateMutex();
     g_system_state_group = xEventGroupCreate();
@@ -70,6 +74,9 @@ static bool CoreState_Init(void) {
     if (!file_system_init()) {
         file_system_format();
     }
+
+    // Save the log before the last reset, and the crash if there was one (needs the file system mounted)
+    reset_log_save();
 
     // 5. Init pin config system (loads pin mappings from NVS)
     pin_config_init();

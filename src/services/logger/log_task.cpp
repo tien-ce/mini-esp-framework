@@ -4,6 +4,7 @@
 #include "built_in.h"
 #include "TienInterpreter.h"
 #include <Arduino.h>
+#include <esp_task_wdt.h>
 #include <unordered_map>
 #include <ArduinoJson.h>
 
@@ -113,6 +114,88 @@ static void esp32_restart(const String &arg) {
     LOG_INFO("System restarting........");
     vTaskDelay(1000);
     ESP.restart();
+}
+
+/** @brief Crash kinds CRASH_TEST can trigger; the index is the command argument. */
+static const char *const s_crash_types[] = {
+    "Null pointer write (StoreProhibited)",
+    "Integer divide by zero (IntegerDivideByZero)",
+    "abort() call",
+    "Call through invalid function pointer (InstrFetchProhibited)",
+    "Stack overflow by endless recursion",
+    "Task watchdog timeout (busy loop)",
+};
+#define CRASH_TYPE_COUNT ((int)(sizeof(s_crash_types) / sizeof(s_crash_types[0])))
+
+/** @brief Recurses forever to overflow the calling task's stack. */
+static int crash_recurse(int depth) {
+    volatile char pad[256]; /* volatile keeps the frame from being optimized away */
+    pad[0] = (char)depth;
+    return crash_recurse(depth + 1) + pad[0];
+}
+
+/** @brief Command handler: Lists the crash types accepted by CRASH_TEST. */
+static void crashTypes(const String &arg) {
+    LOG_INFO("CRASH_TEST types:");
+    for (int i = 0; i < CRASH_TYPE_COUNT; i++) {
+        LOG_INFO_STR("  %d: %s", i, s_crash_types[i]);
+    }
+}
+
+/** @brief Command handler: Crashes the device on purpose to test the crash log. */
+static void crashTest(const String &arg) {
+    String cleanArg = arg;
+    cleanArg.trim();
+
+    /* Accept only a plain number in range */
+    bool is_number = cleanArg.length() > 0;
+    for (unsigned int i = 0; i < cleanArg.length(); i++) {
+        if (!isDigit(cleanArg[i])) is_number = false;
+    }
+    int type = is_number ? cleanArg.toInt() : -1;
+    if (type < 0 || type >= CRASH_TYPE_COUNT) {
+        LOG_WARNING("Invalid crash type: '" + arg + "', see " CMD_CRASH_TYPES);
+        return;
+    }
+
+    LOG_WARNING_STR("Triggering crash %d: %s", type, s_crash_types[type]);
+    vTaskDelay(pdMS_TO_TICKS(200)); /* Let the log task print the line before the crash */
+
+    switch (type) {
+        case 0: {
+            volatile int *ptr = NULL;
+            *ptr = 0;
+            break;
+        }
+        case 1: {
+            volatile int zero = 0;
+            volatile int result = 1 / zero;
+            (void)result;
+            break;
+        }
+        case 2:
+            abort();
+            break;
+        case 3: {
+            void (*volatile fn)(void) = NULL;
+            fn();
+            break;
+        }
+        case 4:
+            crash_recurse(0);
+            break;
+        case 5:
+            /* Watch this task, then never feed the watchdog */
+            if (esp_task_wdt_add(NULL) != ESP_OK) {
+                LOG_ERROR("Task watchdog is not running, can't trigger crash 5");
+                return;
+            }
+            for (;;) {
+            }
+            break;
+        default:
+            break;
+    }
 }
 
 /** @brief Converts LogLevel enum value to string representation. */
@@ -536,6 +619,10 @@ void vLogTask(void *pvParameters) {
                  CmdMeta{"Restart the device", "ESP32_RESTART"});
     register_cmd(CMD_BACKLOG, backlogHandler,
                  CmdMeta{"Run several commands in order", "BACKLOG: <cmd1>; <cmd2>"});
+    register_cmd(CMD_CRASH_TEST, crashTest,
+                 CmdMeta{"Crash the device on purpose to test the crash log", "CRASH_TEST: <type>", "0,1,2,3,4,5"});
+    register_cmd(CMD_CRASH_TYPES, crashTypes,
+                 CmdMeta{"List the crash types of CRASH_TEST", "CRASH_TYPES"});
     LOG_INFO("vLogTask started, sleeping until command arrives...");
     for (;;) {
 #if !(defined(ARDUINO_USB_CDC_ON_BOOT) && (ARDUINO_USB_CDC_ON_BOOT > 0))

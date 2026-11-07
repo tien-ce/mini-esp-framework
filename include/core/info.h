@@ -3,10 +3,31 @@
 
 #include <stdint.h>
 #include <stdbool.h>
+#include "board.h"  /* BOARD_NAME, written to fw_desc_t.board */
 
 #define CHIP_MODEL_STR_MAX_LEN 16
 #define MAC_STR_LEN            18
 #define FW_VERSION_STR         "3.1.1"
+
+/* Firmware descriptor: identifies a mini-esp-framework image (see fw_desc_t) */
+#define FW_DESC_MAGIC          0x4D455346u    /* "FSEM" in memory: marks that the descriptor is present */
+#define FW_DESC_NAME           "MINI_ESP_FW"  /* Same in every version: what OTA compares */
+#define FW_DESC_NAME_LEN       16
+#define FW_DESC_VERSION_LEN    16
+#define FW_DESC_BOARD_LEN      16
+#define FW_DESC_BIN_OFFSET     288            /* Position in firmware.bin: image header 24 + segment header 8 + esp_app_desc_t 256 */
+
+/**
+ * @brief Descriptor placed right after esp_app_desc_t, at FW_DESC_BIN_OFFSET of firmware.bin.
+ * @note Old firmware reads this from new images during OTA: never move or resize a field,
+ *       only append new fields at the end.
+ */
+typedef struct {
+    uint32_t magic;                         /* FW_DESC_MAGIC */
+    char     name[FW_DESC_NAME_LEN];        /* FW_DESC_NAME */
+    char     version[FW_DESC_VERSION_LEN];  /* FW_VERSION_STR of this build */
+    char     board[FW_DESC_BOARD_LEN];      /* BOARD_NAME: an image only installs on the same board */
+} fw_desc_t;
 
 /**
  * @brief Structure storing relevant web display information.
@@ -28,6 +49,9 @@ const char* esp_info_get_mac_str(void);
 
 /** @brief Gets static firmware version string. */
 const char* esp_info_get_fw_version(void);
+
+/** @brief Gets the descriptor of the running firmware (the one stored in its own image). */
+const fw_desc_t* esp_info_get_fw_desc(void);
 
 /** @brief Gets system uptime in seconds. */
 uint32_t esp_info_get_uptime_sec(void);
