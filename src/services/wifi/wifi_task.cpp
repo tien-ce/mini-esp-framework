@@ -212,11 +212,6 @@ static void setup_wifi() {
 /** @brief Command handler: Gets or sets WiFi SSID. */
 static void wifi_cmd_ssid(const String &arg) {
     String cleanVal = arg;
-    cleanVal.trim();
-    while (cleanVal.endsWith(";")) {
-        cleanVal = cleanVal.substring(0, cleanVal.length() - 1);
-        cleanVal.trim();
-    }
     if (cleanVal.length() > 0) {
         if (wifiConfigMutex != NULL && xSemaphoreTake(wifiConfigMutex, portMAX_DELAY) == pdTRUE) {
             wifi_ssid = cleanVal;
@@ -234,11 +229,6 @@ static void wifi_cmd_ssid(const String &arg) {
 /** @brief Command handler: Gets or sets WiFi password. */
 static void wifi_cmd_password(const String &arg) {
     String cleanVal = arg;
-    cleanVal.trim();
-    while (cleanVal.endsWith(";")) {
-        cleanVal = cleanVal.substring(0, cleanVal.length() - 1);
-        cleanVal.trim();
-    }
     if (cleanVal.length() > 0) {
         if (wifiConfigMutex != NULL && xSemaphoreTake(wifiConfigMutex, portMAX_DELAY) == pdTRUE) {
             wifi_password = cleanVal;
@@ -256,11 +246,6 @@ static void wifi_cmd_password(const String &arg) {
 /** @brief Command handler: Gets or sets device Client ID / Hostname. */
 static void wifi_cmd_client_id(const String &arg) {
     String cleanVal = arg;
-    cleanVal.trim();
-    while (cleanVal.endsWith(";")) {
-        cleanVal = cleanVal.substring(0, cleanVal.length() - 1);
-        cleanVal.trim();
-    }
     if (cleanVal.length() > 0) {
         if (wifiConfigMutex != NULL && xSemaphoreTake(wifiConfigMutex, portMAX_DELAY) == pdTRUE) {
             wifi_client_id = cleanVal;
@@ -278,11 +263,6 @@ static void wifi_cmd_client_id(const String &arg) {
 /** @brief Command handler: Gets or sets static IP address. */
 static void wifi_cmd_ip(const String &arg) {
     String cleanVal = arg;
-    cleanVal.trim();
-    while (cleanVal.endsWith(";")) {
-        cleanVal = cleanVal.substring(0, cleanVal.length() - 1);
-        cleanVal.trim();
-    }
     if (cleanVal.indexOf(';') != -1) {
         cleanVal = cleanVal.substring(0, cleanVal.indexOf(';'));
         cleanVal.trim();
@@ -310,11 +290,6 @@ static void wifi_cmd_ip(const String &arg) {
 /** @brief Command handler: Gets or sets static Gateway IP. */
 static void wifi_cmd_gateway(const String &arg) {
     String cleanVal = arg;
-    cleanVal.trim();
-    while (cleanVal.endsWith(";")) {
-        cleanVal = cleanVal.substring(0, cleanVal.length() - 1);
-        cleanVal.trim();
-    }
     if (cleanVal.indexOf(';') != -1) {
         cleanVal = cleanVal.substring(0, cleanVal.indexOf(';'));
         cleanVal.trim();
@@ -342,11 +317,6 @@ static void wifi_cmd_gateway(const String &arg) {
 /** @brief Command handler: Gets or sets static Subnet mask. */
 static void wifi_cmd_subnet(const String &arg) {
     String cleanVal = arg;
-    cleanVal.trim();
-    while (cleanVal.endsWith(";")) {
-        cleanVal = cleanVal.substring(0, cleanVal.length() - 1);
-        cleanVal.trim();
-    }
     if (cleanVal.indexOf(';') != -1) {
         cleanVal = cleanVal.substring(0, cleanVal.indexOf(';'));
         cleanVal.trim();
@@ -374,11 +344,6 @@ static void wifi_cmd_subnet(const String &arg) {
 /** @brief Command handler: Gets or sets static DNS1 server IP. */
 static void wifi_cmd_dns(const String &arg) {
     String cleanVal = arg;
-    cleanVal.trim();
-    while (cleanVal.endsWith(";")) {
-        cleanVal = cleanVal.substring(0, cleanVal.length() - 1);
-        cleanVal.trim();
-    }
     if (cleanVal.indexOf(';') != -1) {
         cleanVal = cleanVal.substring(0, cleanVal.indexOf(';'));
         cleanVal.trim();
