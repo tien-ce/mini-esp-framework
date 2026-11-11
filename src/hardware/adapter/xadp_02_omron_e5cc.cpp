@@ -5,7 +5,7 @@
 #include "core/core_engine.h"
 #include "core/core_log.h"
 #include "hardware/protocol/modbus_master.h"
-#include "built_in.h"
+#include "scripting/builtins/built_in.h"
 #include "TienInterpreter.h"
 
 /* Register map: docs/hardware/omron_e5cc_modbus_address_table.md (2-byte mode) */

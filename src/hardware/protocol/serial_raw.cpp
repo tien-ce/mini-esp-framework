@@ -66,22 +66,21 @@ static SerialRawStatus_t FromBusStatus(SerialBusStatus_t status) {
 static void OnRx(uint8_t port) {
     RawPort_t *rp = &s_raw[port - 1];
 
+    /* Use for to try read whole data before call to call back avoid the limit of buffer size of uart */
     for (;;) {
-        // Step 1: under the lock, take the next chunk (the callback itself runs without it)
-        size_t len;
-        SerialRawRxCb_t cb;
-        {
-            std::lock_guard<std::mutex> guard(rp->lock);
-            if (!rp->opened || rp->rx_cb == NULL) return;
-            size_t avail = (size_t)rp->res->serial->available();
-            if (avail == 0) return;
-            len = (avail > SERIAL_RAW_RX_CHUNK) ? SERIAL_RAW_RX_CHUNK : avail;
-            len = rp->res->serial->read(rp->rx_buf, len);
-            cb = rp->rx_cb;
-        }
+        // Under the lock for the whole chunk, callback included: SerialRaw_Close() waits for a running
+        // callback, so no callback runs once Close() has returned
+        std::lock_guard<std::mutex> guard(rp->lock);
+
+        // Step 1: take the next chunk
+        if (!rp->opened || rp->rx_cb == NULL) return;
+        size_t avail = (size_t)rp->res->serial->available();
+        if (avail == 0) return;
+        size_t len = (avail > SERIAL_RAW_RX_CHUNK) ? SERIAL_RAW_RX_CHUNK : avail;
+        len = rp->res->serial->read(rp->rx_buf, len);
 
         // Step 2: deliver
-        cb(port, rp->rx_buf, len);
+        rp->rx_cb(port, rp->rx_buf, len);
     }
 }
 

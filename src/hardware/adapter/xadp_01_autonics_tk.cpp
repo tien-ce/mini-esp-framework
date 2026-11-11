@@ -5,7 +5,7 @@
 #include "core/core_engine.h"
 #include "core/core_log.h"
 #include "hardware/protocol/modbus_master.h"
-#include "built_in.h"
+#include "scripting/builtins/built_in.h"
 #include "TienInterpreter.h"
 
 #define START_REG_ADDR      0x03E8
@@ -27,6 +27,8 @@ struct AutonicsTKData {
     uint16_t raw_sv;
     uint8_t decimal_point;
     uint8_t unit_code;
+    float raw_heaing_mv;
+    float raw_cooling_mv;
 };
 
 static const char* GetUnitString(uint8_t unit_code) {
@@ -61,6 +63,8 @@ static void ParseTKRegisters(const uint16_t* regs, AutonicsTKData* out_data) {
     out_data->decimal_point = regs[1];
     out_data->unit_code     = regs[2];
     out_data->raw_sv        = regs[3];
+    out_data->raw_heaing_mv = regs[4];
+    out_data->raw_cooling_mv = regs[5];
 }
 
 static value_t *autonic_read(ti_handle_t handle, value_t **argv, int argc) {
@@ -105,6 +109,8 @@ static value_t *autonic_read(ti_handle_t handle, value_t **argv, int argc) {
         val_dict_set(dict_val->dict_val, "pv", val_new_float(atof(pv_str)));
         val_dict_set(dict_val->dict_val, "sv", val_new_float(atof(sv_str)));
         val_dict_set(dict_val->dict_val, "unit", val_new_string(unit_str));
+        val_dict_set(dict_val->dict_val, "heating_mv", val_new_float((float)data.raw_heaing_mv/10));
+        val_dict_set(dict_val->dict_val, "unit", val_new_float((float)data.raw_cooling_mv/10));
     }
     else {
         LOG_WARNING(String("[Xadp1] Failed to read Modbus: ") + ModbusMaster_StatusToStr(ret));

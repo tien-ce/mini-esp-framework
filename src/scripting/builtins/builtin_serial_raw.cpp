@@ -19,7 +19,7 @@
  * way any built-in that needs an Arduino constant should do it.
  */
 
-#include "built_in.h"
+#include "scripting/builtins/built_in.h"
 #include "TienInterpreter.h"
 #include "hardware/protocol/serial_raw.h"
 #include <Arduino.h>
@@ -225,11 +225,11 @@ static void onSerialRx(uint8_t port, const uint8_t *data, size_t len) {
     if (arg == NULL) return;
     value_t *args[1] = { arg };
 
-    // Step 3: a script that is gone cannot receive any more: drop its handler
+    // Step 3: a script that is gone cannot receive any more: drop its handler (later bursts stop at Step 1).
+    // SerialRaw_SetRxCallback() must not be called here: this runs under the serial_raw port lock
     if (ti_post_event(h.handle, h.name, args, 1) == TI_ERR_STALE_HANDLE) {
         std::lock_guard<std::mutex> guard(s_rx_lock);
         s_rx[port - 1].used = false;
-        SerialRaw_SetRxCallback(port, NULL);
     }
 }
 
