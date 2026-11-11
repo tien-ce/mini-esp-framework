@@ -56,6 +56,8 @@ typedef struct {
  * @details Runs in the UART event task of the Arduino core (not in an ISR) once the line was idle, with every
  *          byte that arrived. Bursts longer than SERIAL_RAW_RX_CHUNK arrive as several calls. Keep it short and
  *          never block. data is only valid during the call: copy what you need.
+ *          It runs with the port lock held, so SerialRaw_Close() waits for it and no call happens after Close()
+ *          returned. Never call a SerialRaw_ function from it (the lock is not recursive: deadlock).
  * @param port Port the bytes came from.
  * @param data Received bytes.
  * @param len  Number of bytes in data.

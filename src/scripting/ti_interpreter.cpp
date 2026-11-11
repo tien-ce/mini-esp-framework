@@ -3,9 +3,9 @@
 #include "core/core_log.h"
 #include "services/logger/log_task.h"
 #include "core/file_system.h"
-#include "built_in.h"
+#include "scripting/builtins/built_in.h"
+#include "scripting/module/module_manager.h"
 #include "TienInterpreter.h"
-#include "built_in.h"
 #include <LittleFS.h>
 #include <HTTPClient.h>
 #include <freertos/semphr.h>
@@ -293,6 +293,7 @@ void tien_init(void) {
     }
     #endif
     builtins_init();
+    modules_init();
 
     register_cmd("tien", tien_run_cmd);
     register_cmd("tien_stop", tien_stop_cmd);
