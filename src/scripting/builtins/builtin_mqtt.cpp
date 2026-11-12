@@ -3,81 +3,135 @@
 #include "TienInterpreter.h"
 #include "services/mqtt/mqtt_task.h"
 
+/* -------------------------------------------------------------------------- */
+/*                                   HELPERS                                  */
+/* -------------------------------------------------------------------------- */
+
 /**
- * @brief Add a telemetry key-value pair to the MQTT payload.
- * @param argv Arguments: (string key, int/float/bool/string value).
- * @param argc Argument count (must be 2).
- * @return Boolean value_t: true if the pair was stored, false otherwise.
+ * @brief Add one telemetry key-value pair to the MQTT payload.
+ * @param[in]  key   Telemetry key.
+ * @param[in]  v     Value: int, float, bool or string.
+ * @param[out] ok    Receives the result of mqtt_add_telemetry().
+ * @return true when the type is supported, false when the value is a container (dict, list, bytes, handle, ...).
+ */
+static bool mqtt_put_telemetry(const String &key, const value_t *v, bool *ok) {
+    switch (v->type) {
+        case VAL_INT:    *ok = mqtt_add_telemetry(key, (int)v->int_val);                                 return true;
+        case VAL_FLOAT:  *ok = mqtt_add_telemetry(key, (float)v->float_val);                             return true;
+        case VAL_BOOL:   *ok = mqtt_add_telemetry(key, (bool)v->bool_val);                               return true;
+        case VAL_STRING: *ok = mqtt_add_telemetry(key, v->string_val ? (const char *)v->string_val : ""); return true;
+        default:         return false;
+    }
+}
+
+/**
+ * @brief Set one attribute (published retained on IOT-MONITOR/<ID>/ATTR, only when it changes).
+ * @param[in]  key   Attribute key.
+ * @param[in]  v     Value: int, float, bool or string.
+ * @param[out] ok    Receives the result of mqtt_set_attribute().
+ * @return true when the type is supported, false when the value is a container (dict, list, bytes, handle, ...).
+ */
+static bool mqtt_put_attribute(const String &key, const value_t *v, bool *ok) {
+    switch (v->type) {
+        case VAL_INT:    *ok = mqtt_set_attribute(key, (int)v->int_val);                                 return true;
+        case VAL_FLOAT:  *ok = mqtt_set_attribute(key, (float)v->float_val);                             return true;
+        case VAL_BOOL:   *ok = mqtt_set_attribute(key, (bool)v->bool_val);                               return true;
+        case VAL_STRING: *ok = mqtt_set_attribute(key, v->string_val ? (const char *)v->string_val : ""); return true;
+        default:         return false;
+    }
+}
+
+/**
+ * @brief val_dict_foreach callback for mqtt_update(dict): skip container values.
+ * @param user_context bool*, cleared when one pair is not stored.
+ */
+static bool mqtt_telemetry_entry(const char *key, value_t *value, void *user_context) {
+    bool ok = true;
+    if (mqtt_put_telemetry(String(key), value, &ok) && !ok) {
+        *(bool *)user_context = false;
+    }
+    return true;   /* always go on with the next entry */
+}
+
+/**
+ * @brief val_dict_foreach callback for mqtt_set_attribute(dict): skip container values.
+ * @param user_context bool*, cleared when one pair is not stored.
+ */
+static bool mqtt_attribute_entry(const char *key, value_t *value, void *user_context) {
+    bool ok = true;
+    if (mqtt_put_attribute(String(key), value, &ok) && !ok) {
+        *(bool *)user_context = false;
+    }
+    return true;   /* always go on with the next entry */
+}
+
+/* -------------------------------------------------------------------------- */
+/*                                  BUILTINS                                  */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * @brief Add telemetry to the MQTT payload.
+ * @details Two forms:
+ *          - mqtt_update(dict values): every entry is a pair; container values are skipped.
+ *          - mqtt_update(string key, value): value is int, float, bool or string.
+ * @return Boolean value_t: true if every pair was stored, false otherwise.
  */
 static value_t *built_in_mqtt_update(ti_handle_t handle, value_t **argv, int argc) {
-    /* Step 1: Validate arguments */
-    if (argc != 2 || argv == NULL || argv[0] == NULL || argv[1] == NULL ||
-        argv[0]->type != VAL_STRING || argv[0]->string_val == NULL) {
-        ti_log("[ERROR] mqtt_update: Expect (string key, value)\n");
-        ti_fatal();
+    /* Form 1: one dict, add every entry */
+    if (argc == 1 && argv[0]->type == VAL_DICT) {
+        bool all_ok = true;
+        val_dict_foreach(argv[0]->dict_val, mqtt_telemetry_entry, &all_ok);
+        return val_new_bool(all_ok);
     }
 
-    String key = argv[0]->string_val;
+    /* Form 2: (string key, value) */
+    if (argc != 2) {
+        ti_raise_error(handle, TI_ERR_INVALID_ARG, "mqtt_update: expect (dict values) or (string key, value), got %d args", argc);
+        return NULL;
+    }
+    if (argv[0]->type != VAL_STRING) {
+        ti_raise_error(handle, TI_ERR_TYPE_MISMATCH, "mqtt_update: key must be a string");
+        return NULL;
+    }
+
     bool ok = false;
-
-    /* Step 2: Dispatch on the runtime type of the value */
-    switch (argv[1]->type) {
-        case VAL_INT:
-            ok = mqtt_add_telemetry(key, (int)argv[1]->int_val);
-            break;
-        case VAL_FLOAT:
-            ok = mqtt_add_telemetry(key, (float)argv[1]->float_val);
-            break;
-        case VAL_BOOL:
-            ok = mqtt_add_telemetry(key, (bool)argv[1]->bool_val);
-            break;
-        case VAL_STRING:
-            ok = mqtt_add_telemetry(key, argv[1]->string_val ? (const char *)argv[1]->string_val : "");
-            break;
-        default:
-            ti_log("[ERROR] mqtt_update: Unsupported value type. Only int, float, bool, string are allowed.\n");
-            ti_fatal();
+    if (!mqtt_put_telemetry(String(argv[0]->string_val), argv[1], &ok)) {
+        ti_raise_error(handle, TI_ERR_TYPE_MISMATCH, "mqtt_update: value must be int, float, bool or string");
+        return NULL;
     }
-
     return val_new_bool(ok);
 }
 
 /**
- * @brief Set an attribute (published retained on IOT-MONITOR/<ID>/ATTR, only when it changes).
- * @param argv Arguments: (string key, int/float/bool/string value).
- * @param argc Argument count (must be 2).
- * @return Boolean value_t: true if stored, false otherwise.
+ * @brief Set attributes (published retained on IOT-MONITOR/<ID>/ATTR, only when they change).
+ * @details Two forms:
+ *          - mqtt_set_attribute(dict values): every entry is a pair; container values are skipped.
+ *          - mqtt_set_attribute(string key, value): value is int, float, bool or string.
+ * @return Boolean value_t: true if every pair was stored, false otherwise.
  */
 static value_t *built_in_mqtt_set_attribute(ti_handle_t handle, value_t **argv, int argc) {
-    /* Step 1: Validate arguments */
-    if (argc != 2 || argv == NULL || argv[0] == NULL || argv[1] == NULL ||
-        argv[0]->type != VAL_STRING || argv[0]->string_val == NULL) {
-        ti_log("[ERROR] mqtt_set_attribute: Expect (string key, value)\n");
-        ti_fatal();
+    /* Form 1: one dict, set every entry */
+    if (argc == 1 && argv[0]->type == VAL_DICT) {
+        bool all_ok = true;
+        val_dict_foreach(argv[0]->dict_val, mqtt_attribute_entry, &all_ok);
+        return val_new_bool(all_ok);
     }
 
-    String key = argv[0]->string_val;
+    /* Form 2: (string key, value) */
+    if (argc != 2) {
+        ti_raise_error(handle, TI_ERR_INVALID_ARG, "mqtt_set_attribute: expect (dict values) or (string key, value), got %d args", argc);
+        return NULL;
+    }
+    if (argv[0]->type != VAL_STRING) {
+        ti_raise_error(handle, TI_ERR_TYPE_MISMATCH, "mqtt_set_attribute: key must be a string");
+        return NULL;
+    }
+
     bool ok = false;
-
-    /* Step 2: Dispatch on the runtime type of the value */
-    switch (argv[1]->type) {
-        case VAL_INT:
-            ok = mqtt_set_attribute(key, (int)argv[1]->int_val);
-            break;
-        case VAL_FLOAT:
-            ok = mqtt_set_attribute(key, (float)argv[1]->float_val);
-            break;
-        case VAL_BOOL:
-            ok = mqtt_set_attribute(key, (bool)argv[1]->bool_val);
-            break;
-        case VAL_STRING:
-            ok = mqtt_set_attribute(key, argv[1]->string_val ? (const char *)argv[1]->string_val : "");
-            break;
-        default:
-            ti_log("[ERROR] mqtt_set_attribute: Unsupported value type. Only int, float, bool, string are allowed.\n");
-            ti_fatal();
+    if (!mqtt_put_attribute(String(argv[0]->string_val), argv[1], &ok)) {
+        ti_raise_error(handle, TI_ERR_TYPE_MISMATCH, "mqtt_set_attribute: value must be int, float, bool or string");
+        return NULL;
     }
-
     return val_new_bool(ok);
 }
 
@@ -95,8 +149,8 @@ static value_t *built_in_mqtt_alarm(ti_handle_t handle, value_t **argv, int argc
     }
     valid = valid && argv[4] != NULL && argv[4]->type == VAL_BOOL;
     if (!valid) {
-        ti_log("[ERROR] mqtt_alarm: Expect (string code, string msg, string source, string level, bool active)\n");
-        ti_fatal();
+        ti_raise_error(handle, TI_ERR_INVALID_ARG, "mqtt_alarm: expect (string code, string msg, string source, string level, bool active)");
+        return NULL;
     }
 
     /* Step 2: Queue it; the MQTT task publishes it */
