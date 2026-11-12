@@ -10,4 +10,5 @@
 
 void modules_init(void) {
     hardware_module_init();
+    storage_module_init();
 }
