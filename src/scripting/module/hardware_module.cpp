@@ -17,9 +17,9 @@
 #include "config.h"
 #include "TienInterpreter.h"
 #include "port.h"
-#include "scripting/handle/uart_handle.h"
+#include "scripting/handle/hardware/uart_handle.h"
 #ifdef USE_MODBUS_MASTER
-#include "scripting/handle/modbus_handle.h"
+#include "scripting/handle/hardware/modbus_handle.h"
 #endif
 #ifdef USE_RELAY
 #include "hardware/driver/xdrv_02_relay.h"

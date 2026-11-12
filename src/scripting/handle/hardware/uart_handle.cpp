@@ -4,7 +4,7 @@
  */
 
 /*---- INCLUDES ----*/
-#include "scripting/handle/uart_handle.h"
+#include "scripting/handle/hardware/uart_handle.h"
 
 /*---- DEFINES ----*/
 

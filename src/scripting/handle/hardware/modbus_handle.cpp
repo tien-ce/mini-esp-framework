@@ -6,7 +6,7 @@
 /*---- INCLUDES ----*/
 #include "config.h"
 #ifdef USE_MODBUS_MASTER
-#include "scripting/handle/modbus_handle.h"
+#include "scripting/handle/hardware/modbus_handle.h"
 
 /*---- STATIC FUNCTION PROTOTYPES ----*/
 
