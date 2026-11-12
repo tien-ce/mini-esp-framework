@@ -21,11 +21,6 @@
 #define BUILTIN_FILE_WRITE         "file_write"
 #define BUILTIN_FILE_EXISTS                  "file_exists"
 #define BUILTIN_FILE_REMOVE                  "file_remove"
-#define BUILTIN_RELAY_GET_STATE              "relay_get_state"
-#define BUILTIN_RELAY_SET_STATE              "relay_set_state"
-#define BUILTIN_AUTONICS_TK_SET_SLAVE_ADDRESS "autonics_tk_set_slave_address"
-#define BUILTIN_AUTONICS_TK_GET_PV           "autonics_tk_get_pv"
-#define BUILTIN_AUTONICS_TK_GET_SV           "autonics_tk_get_sv"
 #define BUILTIN_RUN_SCRIPT                   "run_script"
 
 void builtins_init(void);
