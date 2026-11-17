@@ -24,10 +24,8 @@ static value_t *built_in_run_script(ti_handle_t handle, value_t **argv, int argc
     if (argc != 2 || argv == NULL || argv[0] == NULL || argv[1] == NULL ||
         argv[0]->type != VAL_STRING || argv[1]->type != VAL_STRING ||
         argv[0]->string_val == NULL || argv[1]->string_val == NULL) {
-        LOG_ERROR(String(BUILTIN_RUN_SCRIPT) + ": Expect 2 string arguments (name, code)");
-        ti_log("[ERROR] %s: Expect 2 string arguments (name, code)\n", BUILTIN_RUN_SCRIPT);
-        ti_fatal();
-        return val_new_null();
+        ti_raise_error(handle, TI_ERR_INVALID_ARG, "%s: Expect 2 string arguments (name, code)", BUILTIN_RUN_SCRIPT);
+        return NULL;
     }
 
     const char *name = argv[0]->string_val;
