@@ -1,6 +1,6 @@
 /**
  * @file storage_module.cpp
- * @brief Script module "storage": storage resources for scripts (storage.NVS(), later storage.FILE()).
+ * @brief Script module "storage": storage resources for scripts (storage.NVS(), storage.FILE()).
  */
 
 /*---- INCLUDES ----*/
@@ -8,17 +8,20 @@
 #include <new>
 #include "TienInterpreter.h"
 #include "scripting/handle/storage/nvs_handle.h"
+#include "scripting/handle/storage/file_handle.h"
 #include "scripting/module/module_manager.h"
 #include "core/core_log.h"
 
 /*---- STATIC FUNCTION PROTOTYPES ----*/
 
 static value_t *storage_nvs(ti_handle_t handle, value_t **argv, int argc);
+static value_t *storage_file(ti_handle_t handle, value_t **argv, int argc);
 
 /*---- FUNCTIONS ----*/
 
 static const ti_builtin_def_t s_storage_funcs[] = {
-    { "NVS", VAL_HANDLE, NULL, 0, storage_nvs },
+    { "NVS",  VAL_HANDLE, NULL, 0, storage_nvs  },
+    { "FILE", VAL_HANDLE, NULL, 0, storage_file },
 };
 
 /*---- MODULE ----*/
@@ -56,6 +59,35 @@ static value_t *storage_nvs(ti_handle_t handle, value_t **argv, int argc) {
     if (v == NULL) {
         delete self;   // not taken by val_new_handle on failure
         ti_raise_error(handle, TI_ERR_NO_MEMORY, "storage.NVS: out of memory");
+        return NULL;
+    }
+    return v;
+}
+
+/**
+ * @brief storage.FILE(): create a closed file handle; the script opens a file with file.open(path, mode).
+ * @param handle Calling runtime handle, used to raise errors.
+ * @param argv Unused (no arguments).
+ * @param argc Unused.
+ * @return Handle value of type "file"; NULL after raising an error.
+ */
+static value_t *storage_file(ti_handle_t handle, value_t **argv, int argc) {
+    (void)argv;
+    (void)argc;
+
+    // Step 1: the native object; new runs the File constructor (empty File, no file opened yet)
+    //         (nothrow: NULL instead of an exception)
+    file_value_t *self = new (std::nothrow) file_value_t();
+    if (self == NULL) {
+        ti_raise_error(handle, TI_ERR_NO_MEMORY, "storage.FILE: out of memory");
+        return NULL;
+    }
+
+    // Step 2: wrap it; on success the value owns self (file_destroy deletes it)
+    value_t *v = val_new_handle(self, &g_file_handle_type);
+    if (v == NULL) {
+        delete self;   // not taken by val_new_handle on failure
+        ti_raise_error(handle, TI_ERR_NO_MEMORY, "storage.FILE: out of memory");
         return NULL;
     }
     return v;
