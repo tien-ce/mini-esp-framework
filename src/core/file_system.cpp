@@ -38,6 +38,7 @@ const char *file_system_strerror(FsResult_t result)
         case FS_ERR_WRITE_INCOMPLETE: return "Not all bytes were written";
         case FS_ERR_OPERATION_FAILED: return "File system operation failed";
         case FS_ERR_INVALID_ARG:      return "Invalid argument";
+        case FS_ERR_NOT_EMPTY:        return "Directory is not empty";
         default:                      return "Unknown file system error";
     }
 }
@@ -230,7 +231,17 @@ FsResult_t make_directory(const char *path)
     // 2. A file or directory with this name already exists.
     if (LittleFS.exists(path)) return FS_ERR_ALREADY_EXISTS;
 
-    // 3. Create.
+    // 3. The parent must exist and be a directory (mkdir is not recursive).
+    //    "/a/b" -> parent "/a"; "/a" -> parent "/" (always present once mounted).
+    const char *lastSlash = strrchr(path, '/');
+    if (lastSlash && lastSlash != path) {
+        String parent = String(path).substring(0, lastSlash - path);
+        File parentDir = LittleFS.open(parent.c_str());
+        if (!parentDir) return FS_ERR_NOT_FOUND;
+        if (!parentDir.isDirectory()) return FS_ERR_NOT_A_DIRECTORY;
+    }
+
+    // 4. Create.
     return LittleFS.mkdir(path) ? FS_OK : FS_ERR_OPERATION_FAILED;
 }
 
@@ -240,13 +251,19 @@ FsResult_t remove_dir(const char *path)
     // 1. Validate arguments and state.
     if (!path) return FS_ERR_INVALID_ARG;
     if (!s_fs_mounted) return FS_ERR_NOT_MOUNTED;
+    if (strcmp(path, "/") == 0) return FS_ERR_INVALID_ARG;   // the root is never removed
 
     // 2. Must exist and be a directory (a file goes through remove_file()).
     File dir = LittleFS.open(path, "r", false);
     if (!dir) return FS_ERR_NOT_FOUND;
     if (!dir.isDirectory()) return FS_ERR_NOT_A_DIRECTORY;
+
+    // 3. LittleFS refuses a non-empty directory but only answers false, so look for a child first.
+    File child = dir.openNextFile();
+    if (child) return FS_ERR_NOT_EMPTY;
+    child.close();
     dir.close();    // close before deleting
 
-    // 3. Remove (LittleFS refuses a non-empty directory).
+    // 4. Remove.
     return LittleFS.rmdir(path) ? FS_OK : FS_ERR_OPERATION_FAILED;
 }
