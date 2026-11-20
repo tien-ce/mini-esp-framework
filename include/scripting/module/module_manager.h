@@ -13,5 +13,6 @@ void modules_init(void);
 
 void hardware_module_init(void);
 void storage_module_init(void);
+void ipc_module_init(void);
 
 #endif // MODULE_MANAGER_H

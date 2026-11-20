@@ -19,6 +19,8 @@
  *               request(slave, function, address, quantity, timeout_ms) -> {"status": text, "data": bytes}
  *               close()                                              -> "OK" or the error text of modbus_master
  *   Calling request / close on a modbus that is not open raises an error.
+ *   request only accepts the read functions 1..4. A write function (5, 6, 15, 16, ...) or any other code raises
+ *   an error and is never sent: scripts must not be able to change a machine through Modbus.
  */
 
 /*---- INCLUDES ----*/

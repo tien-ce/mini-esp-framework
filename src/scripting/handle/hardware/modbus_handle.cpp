@@ -8,6 +8,16 @@
 #ifdef USE_MODBUS_MASTER
 #include "scripting/handle/hardware/modbus_handle.h"
 
+/*---- DEFINES ----*/
+
+/**
+ * Function codes a script may send: the four reads (1 read coils, 2 read discrete inputs, 3 read holding
+ * registers, 4 read input registers). Every other code is refused, not only the known writes (5, 6, 15, 16,
+ * 22, 23): a write can move a machine, and a code this list does not know must not reach the device either.
+ */
+#define MODBUS_SCRIPT_FUNC_MIN  1
+#define MODBUS_SCRIPT_FUNC_MAX  4
+
 /*---- STATIC FUNCTION PROTOTYPES ----*/
 
 static value_t *modbus_open(ti_handle_t handle, value_t **argv, int argc);
@@ -110,7 +120,8 @@ static value_t *modbus_open(ti_handle_t handle, value_t **argv, int argc) {
 
 /**
  * @brief Method modbus.request(slave, function, address, quantity, timeout_ms): send one request and wait for the answer.
- * @details For a write (function 5, 6), quantity carries the value to write. Slave, function and quantity are
+ * @details Only the read functions 1..4 are accepted: any other function (all the writes included) raises an
+ *          error and nothing is sent, because writing to a device can move a machine. Slave and quantity are
  *          checked by the library (status MBM_ERR_REQUEST); here only the values the casts would wrap are raised.
  * @param handle Calling runtime handle, used to raise script mistakes.
  * @param argv Arguments: (self, slave, function, address, quantity, timeout_ms). Owned by the interpreter, only read.
@@ -147,13 +158,21 @@ static value_t *modbus_request(ti_handle_t handle, value_t **argv, int argc) {
         return NULL;
     }
 
-    // Step 2: send and wait for the answer (blocks the script up to timeout_ms)
+    // Step 2: a script may only read; writing to a device can move a machine, so the request never leaves the board
+    if (function < MODBUS_SCRIPT_FUNC_MIN || function > MODBUS_SCRIPT_FUNC_MAX) {
+        ti_raise_error(handle, TI_ERR_INVALID_ARG,
+                       "modbus.request: function 0x%02X is not allowed from a script (only reads 1..4; writes are blocked)",
+                       function);
+        return NULL;
+    }
+
+    // Step 3: send and wait for the answer (blocks the script up to timeout_ms)
     uint8_t buf[MODBUS_MASTER_MAX_RESPONSE];
     size_t len = sizeof(buf);
     ModbusMasterStatus_t status = ModbusMaster_Send(self->port, (uint8_t)slave, (uint8_t)function, (uint16_t)address,
                                                     (uint16_t)quantity, (uint32_t)timeout_ms, buf, &len);
 
-    // Step 3: build {"status", "data"}; val_dict_set takes the value even when it fails
+    // Step 4: build {"status", "data"}; val_dict_set takes the value even when it fails
     value_t *bytes  = val_new_bytes(buf, (int)len);
     value_t *result = val_new_dict();
     if (bytes == NULL || result == NULL) {
