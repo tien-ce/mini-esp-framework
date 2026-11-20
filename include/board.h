@@ -8,11 +8,14 @@
  */
 #define BOARD_PLC_MINI   1
 #define BOARD_RS485_CAN  2
+#define BOARD_PLC_MULTI  3
 
 #if !defined(BOARD)
     #error "BOARD is not set (platformio.ini: -DBOARD=BOARD_PLC_MINI)"
 #elif BOARD == BOARD_PLC_MINI
     #define BOARD_NAME   "PLC_MINI"
+#elif BOARD == BOARD_PLC_MULTI
+    #define BOARD_NAME   "PLC_MULTI"
 #elif BOARD == BOARD_RS485_CAN
     #define BOARD_NAME   "RS485_CAN"
 #else

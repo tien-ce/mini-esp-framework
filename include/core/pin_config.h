@@ -35,6 +35,8 @@ static const char* AVAILABLE_PIN_OPTIONS[] = {
     "Relay2",
     "Relay3",
     "Relay4",
+    "Relay5",
+    "Relay6",
     "PWM / LED",
     "I2C SDA",
     "I2C SCL",
@@ -57,27 +59,99 @@ struct BoardPinDef {
 };
 
 #if BOARD == BOARD_PLC_MINI
+/* Pinout: docs/hardware/HD SU DUNG BOARD ESP32-S3 PLC MINI.pdf */
 static const BoardPinDef BOARD_PINS[] = {
-    {6, "GPIO6", "Relay1",false},
-    {7, "GPIO7", "Relay2",false},
-    {15, "GPIO15", "Relay3",false},
-    {16, "GPIO16", "Relay4",false},
-    /* Default RS485 Pins for esp32-rs485-can*/
-    {17, "GPIO17", "SERIAL1_TX",false},
-    {18, "GPIO18", "SERIAL1_RX",false},
-    {37, "GPIO37", "None", false},
-    {38, "GPIO38", "None", false},
-    {39, "GPIO39", "None", false},
-    {40, "GPIO40", "None", false},
-    {41, "GPIO41", "None", false},
-    {42, "GPIO42", "None", false},
-    {43, "GPIO43", "None", false},
-    {44, "GPIO44", "None", false},
-    {45, "GPIO45", "None", false},
-    {46, "GPIO46", "None", false},
-    {47, "GPIO47", "None", false},
-    {48, "GPIO48", "None", false},
-    {49, "GPIO49", "None", false},
+    /* Programming header (UART0 + boot): not for user functions */
+    {0,  "GPIO0",  "BOOT",      true},
+    {43, "GPIO43", "UART0_TX",  true},
+    {44, "GPIO44", "UART0_RX",  true},
+    /* Ethernet W5500 (SPI) */
+    {5,  "GPIO5",  "ETH_RST",   true},
+    {10, "GPIO10", "ETH_CS",    true},
+    {11, "GPIO11", "ETH_MOSI",  true},
+    {12, "GPIO12", "ETH_SCLK",  true},
+    {13, "GPIO13", "ETH_MISO",  true},
+    /* 4 transistor outputs, connector OUTPUT pins 1..4 */
+    {6,  "GPIO6",  "Relay1",    false},
+    {7,  "GPIO7",  "Relay2",    false},
+    {15, "GPIO15", "Relay3",    false},
+    {16, "GPIO16", "Relay4",    false},
+    /* Serial 1: Serial1.begin(baud, config, RX 18, TX 17) */
+    {17, "GPIO17", "SERIAL1_TX", false},
+    {18, "GPIO18", "SERIAL1_RX", false},
+    /* 8 inputs, connector INPUT pins 1..8 */
+    {47, "GPIO47", "None",      false},
+    {48, "GPIO48", "None",      false},
+    {45, "GPIO45", "None",      false},
+    {35, "GPIO35", "None",      false},
+    {36, "GPIO36", "None",      false},
+    {37, "GPIO37", "None",      false},
+    {38, "GPIO38", "None",      false},
+    {39, "GPIO39", "None",      false},
+    /* Header 5x2 (GPIO14 and GPIO21 can do PWM; GPIO5 is ETH_RST above) */
+    {1,  "GPIO1",  "None",      false},
+    {2,  "GPIO2",  "None",      false},
+    {4,  "GPIO4",  "None",      false},
+    {14, "GPIO14", "None",      false},
+    {21, "GPIO21", "None",      false},
+    {41, "GPIO41", "None",      false},
+    {42, "GPIO42", "None",      false},
+};
+#elif BOARD == BOARD_PLC_MULTI
+/* Pinout: docs/hardware/HD SU DUNG BOARD ESP32-S3 PLC MUTI.pdf */
+static const BoardPinDef BOARD_PINS[] = {
+    /* Programming port (UART0 + boot): not for user functions */
+    {0,  "GPIO0",  "BOOT",         true},
+    {43, "GPIO43", "UART0_TX",     true},
+    {44, "GPIO44", "UART0_RX",     true},
+    /* Ethernet W5500 (SPI + interrupt) */
+    {4,  "GPIO4",  "ETH_PHY_IRQ",  true},
+    {5,  "GPIO5",  "ETH_RST",      true},
+    {10, "GPIO10", "ETH_CS",       true},
+    {11, "GPIO11", "ETH_MOSI",     true},
+    {12, "GPIO12", "ETH_SCLK",     true},
+    {13, "GPIO13", "ETH_MISO",     true},
+    /* 6 transistor outputs: GPIO 6, 7 share CM1; GPIO 15, 16, 14, 21 share CM0 */
+    {6,  "GPIO6",  "Relay1",       false},
+    {7,  "GPIO7",  "Relay2",       false},
+    {15, "GPIO15", "Relay3",       false},
+    {16, "GPIO16", "Relay4",       false},
+    {14, "GPIO14", "Relay5",       false},
+    {21, "GPIO21", "Relay6",       false},
+    /* Serial 1 (default): Serial1.begin(baud, config, RX 18, TX 17) */
+    {17, "GPIO17", "SERIAL1_TX",   false},
+    {18, "GPIO18", "SERIAL1_RX",   false},
+    /* Serial 2 (default): Serial2.begin(baud, config, RX 2, TX 1) */
+    {1,  "GPIO1",  "SERIAL2_TX",   false},
+    {2,  "GPIO2",  "SERIAL2_RX",   false},
+    /* Inputs, connector INPUT pins 1..8; pins 4..6 (GPIO35..37) are taken
+     * by the octal PSRAM below and must stay cut from the board */
+    {47, "GPIO47", "None",         false},
+    {48, "GPIO48", "None",         false},
+    {45, "GPIO45", "None",         false},
+    {38, "GPIO38", "None",         false},
+    {39, "GPIO39", "None",         false},
+    /* Flash + octal PSRAM bus (N16R8): touching any of these crashes the chip */
+    {26, "GPIO26", "Flash/PSRAM",  true},
+    {27, "GPIO27", "Flash/PSRAM",  true},
+    {28, "GPIO28", "Flash/PSRAM",  true},
+    {29, "GPIO29", "Flash/PSRAM",  true},
+    {30, "GPIO30", "Flash/PSRAM",  true},
+    {31, "GPIO31", "Flash/PSRAM",  true},
+    {32, "GPIO32", "Flash/PSRAM",  true},
+    {33, "GPIO33", "Flash/PSRAM",  true},
+    {34, "GPIO34", "Flash/PSRAM",  true},
+    {35, "GPIO35", "Flash/PSRAM",  true},
+    {36, "GPIO36", "Flash/PSRAM",  true},
+    {37, "GPIO37", "Flash/PSRAM",  true},
+    /* Header 5x2 CN1 (GPIO19 / GPIO20 are the USB D- / D+ pins of the S3) */
+    {3,  "GPIO3",  "None",         false},
+    {19, "GPIO19", "None",         false},
+    {20, "GPIO20", "None",         false},
+    {40, "GPIO40", "None",         false},
+    {41, "GPIO41", "None",         false},
+    {42, "GPIO42", "None",         false},
+    {46, "GPIO46", "None",         false},
 };
 #elif BOARD == BOARD_RS485_CAN
 static const BoardPinDef BOARD_PINS[] = {
