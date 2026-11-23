@@ -1,0 +1,31 @@
+// modbus.ti
+// Read the raw present value (PV) of an Autonics TK (slave 2) every second with the hardware.MODBUS() handle.
+// Registers as in xadp_01_autonics_tk: function 0x04 (Read Input Registers), start address 0x03E8 (1000 = PV).
+
+import hardware as hw;
+
+int slave_id   = 2;     // Autonics TK slave ID
+int function   = 4;     // 0x04 Read Input Registers
+int pv_addr    = 1000;  // 0x03E8: present value
+int quantity   = 1;     // only the PV register (2 bytes)
+int timeout_ms = 500;
+
+handle mb = hw.MODBUS();
+print("Open: ", mb.open(1, 9600, hw.RTU_8N1));
+
+while (true)
+{
+      dict res = mb.request(slave_id, function, pv_addr, quantity, timeout_ms);
+      string status = res["status"];
+
+      if (status == "OK") {
+            bytes data = res["data"];
+            int raw_pv = (data[0] << 8) | data[1];   // high byte first
+            print("Raw PV: ", raw_pv);
+      } else {
+            print("Read failed: ", status);
+      }
+
+      delay(1000);
+}
+mb.close();

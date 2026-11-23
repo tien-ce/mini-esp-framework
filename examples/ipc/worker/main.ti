@@ -1,0 +1,36 @@
+/*
+ * main.ti
+ * Two scripts talking through queues: main sends a number every second, worker answers with the number doubled.
+ *
+ * How to run: upload this folder to /examples/ipc/worker/ on the board, then run main.ti. It starts worker.ti itself.
+ * Stopping main does not stop the worker: call system.stop(config.worker_path) to end it.
+ */
+
+import system;
+import ipc;
+import config;
+
+// The first script to run creates a queue, the others get the same one by name
+handle request = ipc.QUEUE(config.request_queue, 1);
+handle reply   = ipc.QUEUE(config.reply_queue, 1);
+
+// false: the file cannot be read, or the worker is already running
+if (system.run(config.worker_path) == false) {
+    print_warning("Worker not started: ", config.worker_path);
+}
+
+int number = 1;
+while (true) {
+    // send() never waits. When the queue is full the message is dropped and recv below times out
+    request.send(number);
+
+    dict answer = reply.recv(config.reply_timeout_ms);
+    if (answer == null) {
+        print_warning("Worker did not answer");
+    } else {
+        print(answer["number"], " x 2 = ", answer["doubled"]);
+    }
+
+    number += 1;
+    delay(1000);
+}

@@ -1,0 +1,19 @@
+/*
+ * worker.ti
+ * Sleep until main.ti sends a number, then answer with the number doubled.
+ * Started by main.ti with system.run().
+ */
+
+import ipc;
+import config;
+
+handle request = ipc.QUEUE(config.request_queue, 1);
+handle reply   = ipc.QUEUE(config.reply_queue, 1);
+
+while (true) {
+    // A negative timeout waits forever. null means this script is being stopped
+    int number = request.recv(-1);
+    if (number != null) {
+        reply.send({"number": number, "doubled": number * 2});
+    }
+}

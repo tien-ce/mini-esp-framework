@@ -1,0 +1,12 @@
+import storage;
+
+handle nvs = storage.NVS();
+if(!nvs.open("nvs"))
+{
+    return;
+}
+
+nvs.write("max",90);
+int max = nvs.read("max", 60);
+print(max);
+nvs.close();

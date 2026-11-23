@@ -1,0 +1,20 @@
+/*
+ * elapsed_time.ti
+ * Run a job at a fixed interval without one long delay.
+ *
+ * system.uptime_ms() is a tick that wraps after about 24.8 days: never add to it or subtract from it.
+ * Keep it as a start point and let system.elapsed_ms() compute the interval, which stays correct across the wrap.
+ */
+
+import system;
+
+int interval_ms = 5000;
+int last_ms = system.uptime_ms();
+
+while (true) {
+    if (system.elapsed_ms(last_ms) >= interval_ms) {
+        last_ms = system.uptime_ms();
+        print("Job ran at uptime ", system.uptime_s(), " s");
+    }
+    delay(100);
+}

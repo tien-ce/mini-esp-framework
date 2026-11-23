@@ -1,0 +1,27 @@
+/*
+ * file.ti
+ * Append one line to a LittleFS file, then read the whole file back.
+ * Each run adds one line.
+ */
+
+import storage;
+import system;
+
+string path = "/example_log.txt";
+
+// Mode "a" creates the file when it does not exist. open() raises an error when it fails
+handle log_file = storage.FILE();
+log_file.open(path, "a");
+int written = log_file.write("uptime_s=" + to_string(system.uptime_s()) + "\n");
+
+// The data is only safe on flash after flush() or close()
+log_file.close();
+print("Wrote ", written, " bytes");
+
+// file_read returns null when the file does not exist
+string content = file_read(path);
+if (content == null) {
+    print_error("Cannot read ", path);
+} else {
+    print(content);
+}
