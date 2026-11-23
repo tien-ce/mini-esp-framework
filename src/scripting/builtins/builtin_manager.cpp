@@ -10,5 +10,4 @@ void builtins_init(void) {
     builtin_web_init();
     builtin_mqtt_init();
     builtin_script_init();
-    builtin_dispatcher_init();
 }

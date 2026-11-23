@@ -6,22 +6,17 @@
 /*---- INCLUDES ----*/
 #include "scripting/handle/hardware/uart_handle.h"
 
-/*---- DEFINES ----*/
-
-/** Longest on_receive handler name, terminator included. */
-#define UART_HANDLER_NAME_MAX   32
-
 /*---- TYPES ----*/
 
-/** Script handler of one port, set by uart.on_receive(). Empty: runtime == TI_INVALID_HANDLE or name[0] == '\0'. */
+/** Script handler of one port, set by uart.on_receive(). Empty: func == NULL. */
 typedef struct {
-    ti_handle_t runtime;                        /* Runtime that called on_receive(); the data is posted to it */
-    char        name[UART_HANDLER_NAME_MAX];    /* Handler function name (copy) */
+    ti_handle_t runtime;   /* Runtime that called on_receive(); the data is posted to it */
+    value_t    *func;      /* Handler function value (own copy, freed when replaced or when the port closes) */
 } UartRxSlot_t;
 
 /*---- STATIC VARIABLES ----*/
 
-/** One slot per port, index = port - 1. Static, so every slot starts empty (0 / ""). */
+/** One slot per port, index = port - 1. Static, so every slot starts empty (NULL). */
 static UartRxSlot_t s_rx_slots[SERIAL_BUS_PORT_COUNT];
 
 /*---- STATIC FUNCTION PROTOTYPES ----*/
@@ -85,14 +80,15 @@ const ti_handle_type_t g_uart_handle_type = {
  * @param len Number of bytes.
  */
 static void uart_on_rx(uint8_t port, const uint8_t *data, size_t len) {
+    // The slot is only changed while this callback is removed (port lock), so it is stable here
     const UartRxSlot_t *slot = &s_rx_slots[port - 1];
-    if (slot->runtime == TI_INVALID_HANDLE || slot->name[0] == '\0') return;
+    if (slot->func == NULL) return;
 
-    // Exactly len bytes -> VAL_BYTES (ti_post_event takes it, also on failure)
+    // Exactly len bytes -> VAL_BYTES (ti_post_event takes it, also on failure; the function value is borrowed)
     value_t *arg = val_new_bytes(data, (int)len);
     if (arg == NULL) return;
     value_t *args[1] = { arg };
-    ti_post_event(slot->runtime, slot->name, args, 1);
+    ti_post_event(slot->runtime, slot->func, args, 1);
 }
 
 /*---- STATIC FUNCTIONS: HELPERS ----*/
@@ -106,7 +102,10 @@ static void uart_on_rx(uint8_t port, const uint8_t *data, size_t len) {
  */
 static SerialRawStatus_t uart_close_port(uart_handle_t *self) {
     SerialRawStatus_t status = SerialRaw_Close(self->port);
-    memset(&s_rx_slots[self->port - 1], 0, sizeof(UartRxSlot_t));
+    UartRxSlot_t *slot = &s_rx_slots[self->port - 1];
+    val_free(slot->func);   // val_free(NULL) does nothing
+    slot->func = NULL;
+    slot->runtime = TI_INVALID_HANDLE;
     self->is_open = false;
     return status;
 }
@@ -267,23 +266,33 @@ static value_t *uart_read(ti_handle_t handle, value_t **argv, int argc) {
 static value_t *uart_on_receive(ti_handle_t handle, value_t **argv, int argc) {
     (void)argc;
     uart_handle_t *self = (uart_handle_t *)argv[0]->handle_val->ptr;
-    const char *name = argv[1]->func_name;
 
     // Step 1: script mistakes are raised (the slot is indexed by the port, known only once open)
     if (!self->is_open) {
         ti_raise_error(handle, TI_ERR_INVALID_VALUE, "uart.on_receive: uart is not open");
         return NULL;
     }
-    if (strlen(name) >= UART_HANDLER_NAME_MAX) {
-        ti_raise_error(handle, TI_ERR_VALUE_OUT_OF_RANGE, "uart.on_receive: handler name longer than %d characters",
-                       UART_HANDLER_NAME_MAX - 1);
+    if (val_func_name(argv[1]) == NULL) {
+        ti_raise_error(handle, TI_ERR_INVALID_ARG, "uart.on_receive: expects a defined function");
         return NULL;
     }
 
-    // Step 2: fill the slot first, then register the callback, so the callback never sees a half-set slot
+    // Step 2: own copy of the handler (argv is freed after this call)
+    value_t *func = val_copy(argv[1]);
+    if (func == NULL) {
+        ti_raise_error(handle, TI_ERR_NO_MEMORY, "uart.on_receive: out of memory");
+        return NULL;
+    }
+
+    // Step 3: remove the callback first. SerialRaw_SetRxCallback takes the port lock that a running callback holds,
+    // so after it returns no callback reads the slot and the old handler can be freed
+    SerialRaw_SetRxCallback(self->port, NULL);
     UartRxSlot_t *slot = &s_rx_slots[self->port - 1];
-    strcpy(slot->name, name);
+    val_free(slot->func);
+    slot->func = func;
     slot->runtime = handle;
+
+    // Step 4: register the callback again with the filled slot
     return val_new_string(SerialRaw_StatusToStr(SerialRaw_SetRxCallback(self->port, uart_on_rx)));
 }
 

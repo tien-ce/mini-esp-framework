@@ -34,7 +34,6 @@ void builtin_web_init(void);
 void builtin_nvs_init(void);
 void builtin_mqtt_init(void);
 void builtin_script_init(void);
-void builtin_dispatcher_init(void);
 void builtin_modbus_init(void);
 void builtin_serial_raw_init(void);
 

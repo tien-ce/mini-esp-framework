@@ -230,35 +230,36 @@ static void interpreter_task(void *pvParameters) {
 /*                              PUBLIC FUNCTIONS                              */
 /* -------------------------------------------------------------------------- */
 
-void tien_run_file(const char *path) {
+bool tien_run_file(const char *path) {
     if (!has_tien_extension(path)) {
         LOG_ERROR(String(path) + " is not a .ti file");
-        return;
+        return false;
     }
     char *buffer = NULL;
     size_t read_bytes = 0;
     FsResult_t ret = read_file(path, &buffer, &read_bytes);
     if (ret != FS_OK) {
         LOG_ERROR("Read error: " + String(file_system_strerror(ret)));
-        return;
+        return false;
     }
     /* Use path like the name of script task */
-    tien_run_script(path, buffer);
+    bool started = tien_run_script(path, buffer);
     free(buffer);
+    return started;
 }
 
-void tien_run_script(const char *name, const char *source_code) {
+bool tien_run_script(const char *name, const char *source_code) {
     /* Check the NULL pointer for safely */
     if (name == NULL || strlen(name) == 0 || source_code == NULL) {
         LOG_ERROR("Invalid script name or source code");
-        return;
+        return false;
     }
 
     /* Create new task_t to pass to task, copy name and source code to free independently */
     tien_task_t *task = (tien_task_t *)calloc(1, sizeof(tien_task_t));
     if (task == NULL) {
         LOG_ERROR_STR("Memory allocation failed for task '%s'", name);
-        return;
+        return false;
     }
 
     /* Copy source code and name to avoid depent or the resource passed */
@@ -268,7 +269,7 @@ void tien_run_script(const char *name, const char *source_code) {
     if (task->source_code == NULL) {
         free(task);
         LOG_ERROR_STR("Memory allocation failed for task '%s'", name);
-        return;
+        return false;
     }
 
     /* Create new runtime instance */
@@ -277,7 +278,7 @@ void tien_run_script(const char *name, const char *source_code) {
         free(task->source_code);
         free(task);
         LOG_ERROR_STR("Failed to allocate runtime for task '%s'", name);
-        return;
+        return false;
     }
 
     /* Assign runtime to task (used for cooperative cancellation via ti_stop) */
@@ -289,7 +290,7 @@ void tien_run_script(const char *name, const char *source_code) {
         ti_destroy(task->handle);
         free(task->source_code);
         free(task);
-        return;
+        return false;
     }
 
     /* Create new FreeRTOS task to run in background */
@@ -302,15 +303,16 @@ void tien_run_script(const char *name, const char *source_code) {
         ti_destroy(task->handle);
         free(task->source_code);
         free(task);
-        return;
+        return false;
     }
 
     /* The task may already be finished and freed here, so only use 'name' from now on */
     LOG_INFO("Tien task '" + String(name) + "' created successfully");
+    return true;
 }
 
-void tien_stop(const char *name) {
-    if (name == NULL || strlen(name) == 0) return;
+bool tien_stop(const char *name) {
+    if (name == NULL || strlen(name) == 0) return false;
 
     /* Search for running script task by name; copy the handle because the task may free itself after unlock */
     bool found = false;
@@ -327,7 +329,7 @@ void tien_stop(const char *name) {
 
     if (!found) {
         LOG_ERROR_STR("Task '%s' not found", name);
-        return;
+        return false;
     }
 
     /*
@@ -339,6 +341,21 @@ void tien_stop(const char *name) {
         ti_stop(handle);
         LOG_INFO("Stop requested for Tien task '" + String(name) + "'");
     }
+    return true;
+}
+
+int tien_get_names(char names[][TIEN_NAME_LEN], int max) {
+    int count = 0;
+    xSemaphoreTake(g_tien_tasks_lock, portMAX_DELAY);
+    for (int i = 0; i < TI_MAX_RUNTIMES && count < max; i++) {
+        if (g_tien_tasks[i] != NULL) {
+            /* Same size as tien_task_t.name, which is always terminated */
+            memcpy(names[count], g_tien_tasks[i]->name, TIEN_NAME_LEN);
+            count++;
+        }
+    }
+    xSemaphoreGive(g_tien_tasks_lock);
+    return count;
 }
 
 void tien_init(void) {
