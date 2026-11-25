@@ -27,6 +27,9 @@ String getWebPassword();
 /** @brief Updates web server configuration settings. */
 void updateWebConfig(uint16_t port, const String &user, const String &pass);
 
+/** @brief Starts the FreeRTOS Web Server & Monitor task. */
+void web_server_task_start(void);
+
 /** @brief FreeRTOS task for web server monitoring and WebSocket cleanup. */
 void vWebMonitorTask(void *pvParameters);
 

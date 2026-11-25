@@ -13,12 +13,8 @@
 
 #include <Arduino.h>
 #include "core/core_engine.h"
-
-/* -------------------------------------------------------------------------- */
-/*                            FORWARD DECLARATIONS                            */
-/* -------------------------------------------------------------------------- */
-
-extern void initSensorTasks(); // Forward declaration for sensor task initialization
+#include "services/services.h"
+#include "scripting/ti_interpreter.h"
 
 /* -------------------------------------------------------------------------- */
 /*                              PUBLIC FUNCTIONS                              */
@@ -30,10 +26,21 @@ extern void initSensorTasks(); // Forward declaration for sensor task initializa
  * @return None
  */
 void setup() {
-    // 1. Boot Core Engine Infrastructure (LittleFS, Log, WiFi, WebServer, Core Tasks)
+    // 1. Boot Core Engine Infrastructure (Filesystem, NVS, System State Group)
     CoreEngine_Start();
-    // 2. Application Layer: Initialize Hardware GPIO & Sensor Tasks
-    //initSensorTasks();
+
+    // 2. Boot Services Layer (Log, WiFi, WebServer, MQTT)
+    services_start();
+
+    // 3. Initialize Scripting Runtime (Tien Interpreter & builtins)
+    tien_init();
+
+    // 4. Boot complete: every service and the script hook exist, release the
+    //    tasks waiting on SYS_NORMAL (dispatcher, WiFi)
+    CoreState_SetMode(SYS_NORMAL);
+
+    // 5. Application Layer: run user init script
+    tien_run_file("/init.ti");
 
     Serial.println("=== Initialization Complete & Multitasking System Running ===\n");
 }

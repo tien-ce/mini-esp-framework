@@ -1,5 +1,6 @@
 #include "services/ota/ota_session.h"
 #include "core/core_log.h"
+#include "core/info.h"
 #include <Update.h>
 #include <esp_ota_ops.h>
 #include <esp_heap_caps.h>
@@ -229,11 +230,11 @@ static void otaTimeoutCallback(TimerHandle_t timer) {
 }
 
 /**
- * @brief Checks the image header of the first chunk (magic byte and chip id).
+ * @brief Checks the image header of the first chunk (magic byte, chip id and firmware descriptor).
  * @param data First bytes of the firmware.
  * @param len Number of bytes available.
  * @param err Filled when the header is not acceptable.
- * @return true when the header looks like a firmware for this chip.
+ * @return true when the header looks like a mini-esp-framework firmware for this chip.
  */
 static bool otaCheckHeader(const uint8_t *data, size_t len, OtaError &err) {
     if (len < 1 || data[0] != OTA_IMAGE_MAGIC) {
@@ -249,6 +250,34 @@ static bool otaCheckHeader(const uint8_t *data, size_t len, OtaError &err) {
         otaSetError(err, 400, "chip", "wrong_chip", false, "Firmware is built for another chip (id %u)", (unsigned)chipId);
         return false;
     }
+
+    // The uploaded image is not running, so its descriptor is read from its bytes, not from a variable
+    if (len < FW_DESC_BIN_OFFSET + sizeof(fw_desc_t)) {
+        otaSetError(err, 400, "app", "short_app_desc", false, "First chunk too short to hold the firmware descriptor");
+        return false;
+    }
+    fw_desc_t uploaded;
+    memcpy(&uploaded, data + FW_DESC_BIN_OFFSET, sizeof(uploaded)); /* Copy: the offset is not 4-byte aligned in buf */
+    const fw_desc_t *running = esp_info_get_fw_desc();
+
+    if (uploaded.magic != FW_DESC_MAGIC) {
+        otaSetError(err, 400, "app", "no_fw_desc", false, "Not a mini-esp-framework firmware");
+        return false;
+    }
+    if (strncmp(uploaded.name, running->name, FW_DESC_NAME_LEN) != 0) {
+        otaSetError(err, 400, "app", "wrong_fw_name", false, "Firmware is '%.*s', expected '%s'",
+                    FW_DESC_NAME_LEN, uploaded.name, running->name);
+        return false;
+    }
+    /* Same framework built for another board: different pins/PSRAM, would boot into wrong hardware */
+    if (strncmp(uploaded.board, running->board, FW_DESC_BOARD_LEN) != 0) {
+        otaSetError(err, 400, "app", "wrong_board", false, "Firmware is for board '%.*s', this board is '%s'",
+                    FW_DESC_BOARD_LEN, uploaded.board, running->board);
+        return false;
+    }
+
+    LOG_INFO_STR("[OTA] Firmware %s -> %.*s (%s)", running->version, FW_DESC_VERSION_LEN, uploaded.version,
+                 running->board);
     return true;
 }
 

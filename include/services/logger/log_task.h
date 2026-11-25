@@ -2,16 +2,8 @@
 #define LOG_TASK_H
 
 #include <Arduino.h>
+#include "cmd.h"
 #include "core/core_log.h"
-
-/* HTML Color Wrappers for Web (WebSocket) */
-#define WEB_COLOR_RESET   "</span>"
-#define WEB_COLOR_RED     "<span style='color:#ff4d4d;'>"
-#define WEB_COLOR_GREEN   "<span style='color:#00ff00;'>"
-#define WEB_COLOR_YELLOW  "<span style='color:#ffff00;'>"
-#define WEB_COLOR_CYAN    "<span style='color:#00ffff;'>"
-#define WEB_COLOR_WHITE   "<span style='color:#ffffff;'>"
-#define WEB_COLOR_GRAY    "<span style='color:#aaaaaa;'>"
 
 /**
  * @brief Callback function type for command handlers.
@@ -45,6 +37,9 @@ struct CommandPacket {
 /** @brief Early initialization of Serial hardware and logging mutex. */
 void log_task_init(void);
 
+/** @brief Starts the FreeRTOS Log & Command processing task. */
+void log_task_start(void);
+
 /** @brief FreeRTOS task for log and command processing. */
 void vLogTask(void *pvParameters);
 
@@ -62,9 +57,6 @@ bool register_cmd(const String &name, CommandHandlerFunc handler, const CmdMeta 
  * @param out Destination stream, typically an AsyncResponseStream.
  */
 void cmd_list_json(Print &out);
-
-/** @brief Enables Web WebSocket log output. */
-void setWebLogReady();
 
 /** @brief Posts incoming command to vLogTask queue. */
 void postIncomingCommand(const String &cmdText);

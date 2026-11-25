@@ -22,6 +22,7 @@ struct UploadContext {
     }
 };
 
+#ifdef SYSTEM_USES_PSRAM
 // Custom Allocator forcing all internal allocations to PSRAM
 struct PsramAllocator : ArduinoJson::Allocator {
     void* allocate(size_t size) override {
@@ -35,7 +36,8 @@ struct PsramAllocator : ArduinoJson::Allocator {
     }
 };
 // Global or static instance of the allocator
-PsramAllocator psramAlloc;
+static PsramAllocator psramAlloc;
+#endif
 /* -------------------------------------------------------------------------- */
 /*                              STATIC FUNCTIONS                              */
 /* -------------------------------------------------------------------------- */
@@ -344,4 +346,5 @@ void register_fs_routes(AsyncWebServer *server) {
     server->on("/api/fs/save", HTTP_POST, handleFSSaveRequest, NULL, handleFSSaveBody);
     server->on("/api/fs/delete", HTTP_POST, handleFSDeleteRequest);
     server->on("/api/fs/mkdir", HTTP_POST, handleFSMkdirRequest);
+    server->on("/api/fs/rename", HTTP_POST, handleFSRenameRequest);
 }

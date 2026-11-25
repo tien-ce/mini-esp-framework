@@ -1,10 +1,10 @@
 #include "services/logger/log_task.h"
 #include "core/core_nvs.h"
-#include "services/web/web_server_task.h"
 #include "core/core_engine.h"
 #include "built_in.h"
 #include "TienInterpreter.h"
 #include <Arduino.h>
+#include <esp_task_wdt.h>
 #include <unordered_map>
 #include <ArduinoJson.h>
 
@@ -114,6 +114,88 @@ static void esp32_restart(const String &arg) {
     LOG_INFO("System restarting........");
     vTaskDelay(1000);
     ESP.restart();
+}
+
+/** @brief Crash kinds CRASH_TEST can trigger; the index is the command argument. */
+static const char *const s_crash_types[] = {
+    "Null pointer write (StoreProhibited)",
+    "Integer divide by zero (IntegerDivideByZero)",
+    "abort() call",
+    "Call through invalid function pointer (InstrFetchProhibited)",
+    "Stack overflow by endless recursion",
+    "Task watchdog timeout (busy loop)",
+};
+#define CRASH_TYPE_COUNT ((int)(sizeof(s_crash_types) / sizeof(s_crash_types[0])))
+
+/** @brief Recurses forever to overflow the calling task's stack. */
+static int crash_recurse(int depth) {
+    volatile char pad[256]; /* volatile keeps the frame from being optimized away */
+    pad[0] = (char)depth;
+    return crash_recurse(depth + 1) + pad[0];
+}
+
+/** @brief Command handler: Lists the crash types accepted by CRASH_TEST. */
+static void crashTypes(const String &arg) {
+    LOG_INFO("CRASH_TEST types:");
+    for (int i = 0; i < CRASH_TYPE_COUNT; i++) {
+        LOG_INFO_STR("  %d: %s", i, s_crash_types[i]);
+    }
+}
+
+/** @brief Command handler: Crashes the device on purpose to test the crash log. */
+static void crashTest(const String &arg) {
+    String cleanArg = arg;
+    cleanArg.trim();
+
+    /* Accept only a plain number in range */
+    bool is_number = cleanArg.length() > 0;
+    for (unsigned int i = 0; i < cleanArg.length(); i++) {
+        if (!isDigit(cleanArg[i])) is_number = false;
+    }
+    int type = is_number ? cleanArg.toInt() : -1;
+    if (type < 0 || type >= CRASH_TYPE_COUNT) {
+        LOG_WARNING("Invalid crash type: '" + arg + "', see " CMD_CRASH_TYPES);
+        return;
+    }
+
+    LOG_WARNING_STR("Triggering crash %d: %s", type, s_crash_types[type]);
+    vTaskDelay(pdMS_TO_TICKS(200)); /* Let the log task print the line before the crash */
+
+    switch (type) {
+        case 0: {
+            volatile int *ptr = NULL;
+            *ptr = 0;
+            break;
+        }
+        case 1: {
+            volatile int zero = 0;
+            volatile int result = 1 / zero;
+            (void)result;
+            break;
+        }
+        case 2:
+            abort();
+            break;
+        case 3: {
+            void (*volatile fn)(void) = NULL;
+            fn();
+            break;
+        }
+        case 4:
+            crash_recurse(0);
+            break;
+        case 5:
+            /* Watch this task, then never feed the watchdog */
+            if (esp_task_wdt_add(NULL) != ESP_OK) {
+                LOG_ERROR("Task watchdog is not running, can't trigger crash 5");
+                return;
+            }
+            for (;;) {
+            }
+            break;
+        default:
+            break;
+    }
 }
 
 /** @brief Converts LogLevel enum value to string representation. */
@@ -374,35 +456,8 @@ static void processHardwareSerialInput() {
 }
 #endif
 
-/**
- * @brief Initializes Serial interface and creates logging mutex & command queue.
- */
-static void websocket_log_cb(const String &msg, LogLevel level) {
-    WebServerState_t webState = CoreState_GetWebServer();
-    bool web_ready = (webState == WEB_STATE_LISTENING || webState == WEB_STATE_CLIENT_CONNECTED);
-    if (!web_ready) return;
-
-    switch (level) {
-        case LOG_LEVEL_DEBUG:
-            ws.textAll(String(WEB_COLOR_WHITE) + msg + WEB_COLOR_RESET);
-            break;
-        case LOG_LEVEL_INFO:
-            ws.textAll(String(WEB_COLOR_GREEN) + msg + WEB_COLOR_RESET);
-            break;
-        case LOG_LEVEL_WARNING:
-            ws.textAll(String(WEB_COLOR_YELLOW) + msg + WEB_COLOR_RESET);
-            break;
-        case LOG_LEVEL_ERROR:
-            ws.textAll(String(WEB_COLOR_RED) + msg + WEB_COLOR_RESET);
-            break;
-        default:
-            break;
-    }
-}
-
 void log_task_init(void) {
     core_log_init();
-    core_log_register_cb(websocket_log_cb);
 
     if (commandQueue == NULL) {
         commandQueue = xQueueCreate(32, sizeof(CommandPacket));
@@ -425,12 +480,6 @@ void log_task_init(void) {
         }
     });
 #endif
-}
-/**
- * @brief Updates system mode to normal to enable Serial log output.
- */
-static void setSerialLogReady() {
-    CoreState_SetMode(SYS_NORMAL);
 }
 
 /* -------------------------------------------------------------------------- */
@@ -521,13 +570,6 @@ void cmd_list_json(Print &out) {
 }
 
 /**
- * @brief Updates WebServer state to listening to enable Web WebSocket log output.
- */
-void setWebLogReady() {
-    CoreState_SetWebServer(WEB_STATE_LISTENING);
-}
-
-/**
  * @brief Thread-safe function to post incoming command from Serial or Web to vLogTask queue.
  * @param cmdText Command text string.
  */
@@ -544,14 +586,28 @@ void postIncomingCommand(const String &cmdText) {
 }
 
 /**
+ * @brief Starts the FreeRTOS Log & Command processing task.
+ */
+void log_task_start(void) {
+    log_task_init();
+    xTaskCreatePinnedToCore(
+        vLogTask,
+        "LogTask",
+        4096,
+        NULL,
+        5,
+        NULL,
+        1
+    );
+}
+
+/**
  * @brief FreeRTOS Task function body (Event-driven execution loop for log task).
  */
 void vLogTask(void *pvParameters) {
-    /* Wait until core engine is done */
-    waiting_on_event(SYSTEM_EVENT, SYS_SETUP, portMAX_DELAY);
+    /* Core engine is already up: services_start() runs after CoreEngine_Start() */
     CommandPacket packet;
     loadLogConfig();
-    setSerialLogReady();
     LOG_INFO("Init log task done. Current level: " + levelToStr(core_log_get_level())); 
     register_cmd(CMD_SET_LOG_LEVEL, setLogLevel,
                  CmdMeta{"Set the log level", "CMD_SET_LEVEL: <level>", "DEBUG,INFO,WARNING,ERROR"});
@@ -563,6 +619,10 @@ void vLogTask(void *pvParameters) {
                  CmdMeta{"Restart the device", "ESP32_RESTART"});
     register_cmd(CMD_BACKLOG, backlogHandler,
                  CmdMeta{"Run several commands in order", "BACKLOG: <cmd1>; <cmd2>"});
+    register_cmd(CMD_CRASH_TEST, crashTest,
+                 CmdMeta{"Crash the device on purpose to test the crash log", "CRASH_TEST: <type>", "0,1,2,3,4,5"});
+    register_cmd(CMD_CRASH_TYPES, crashTypes,
+                 CmdMeta{"List the crash types of CRASH_TEST", "CRASH_TYPES"});
     LOG_INFO("vLogTask started, sleeping until command arrives...");
     for (;;) {
 #if !(defined(ARDUINO_USB_CDC_ON_BOOT) && (ARDUINO_USB_CDC_ON_BOOT > 0))

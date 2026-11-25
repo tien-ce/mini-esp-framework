@@ -32,7 +32,7 @@ enum OtaState {
 /** Description of one failure, shaped like the JSON error answer of the API. */
 struct OtaError {
     uint16_t    http;            /**< HTTP status to answer with. */
-    const char *stage;           /**< Stage name (busy, size, magic, chip, oom, session, offset, length, crc, write, md5, end, timeout, begin). */
+    const char *stage;           /**< Stage name (busy, size, magic, chip, app, oom, session, offset, length, crc, write, md5, end, timeout, begin). */
     const char *code;            /**< Short machine readable code. */
     char        message[80];     /**< Short English text. */
     int32_t     chunk;           /**< Chunk index, or -1 when not applicable. */

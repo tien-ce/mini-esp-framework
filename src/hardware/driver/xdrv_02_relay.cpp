@@ -2,6 +2,9 @@
 #ifdef USE_RELAY
 #include <Arduino.h>
 #include "core/core_engine.h"
+#include "services/web/web_template.h"
+#include "services/logger/log_task.h"
+#include "services/mqtt/mqtt_task.h"
 #include "built_in.h"
 #include "TienInterpreter.h"
 

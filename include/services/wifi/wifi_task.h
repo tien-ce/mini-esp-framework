@@ -3,7 +3,12 @@
 
 #include <Arduino.h>
 #include <WiFi.h>
+#include "services/wifi/wifi_state.h"
 #include "core/core_nvs.h"
+
+/* -------------------------------------------------------------------------- */
+/*                                WIFI API                                    */
+/* -------------------------------------------------------------------------- */
 
 /** @brief Gets current WiFi SSID. */
 String getWifiSSID();
@@ -43,6 +48,23 @@ wl_status_t get_wifi_link_status();
 
 /** @brief Gets WiFi RSSI signal strength. */
 int get_wifi_rssi();
+
+/** @brief Gets the current local IP as text ("" when not connected or no address yet). */
+String get_wifi_local_ip();
+
+/** @brief Gets the current gateway as text ("" when not connected or no address yet). */
+String get_wifi_gateway_ip();
+
+/** @brief Gets the current subnet mask as text ("" when not connected or no address yet). */
+String get_wifi_subnet_mask();
+
+/** @brief Gets the current DNS server as text ("" when not connected or no address yet). */
+String get_wifi_dns_ip();
+
+/**
+ * @brief Starts the FreeRTOS WiFi management task.
+ */
+void wifi_task_start(void);
 
 /**
  * @brief FreeRTOS task quản lý cấu hình mạng WiFi và máy trạng thái tự động kết nối lại non-blocking.

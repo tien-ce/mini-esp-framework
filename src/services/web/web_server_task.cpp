@@ -1,4 +1,5 @@
 #include "services/web/web_server_task.h"
+#include "services/wifi/wifi_state.h"
 #include "core/core_nvs.h"
 #include "core/core_log.h"
 #include "core/core_engine.h"
@@ -86,7 +87,6 @@ static void setupWebServer() {
     register_ota_routes(server);
 
     server->begin();
-    setWebLogReady();
     Serial.println("Web Server started on port " + String(getWebPort()));
     Serial.println("Open: http://" + WiFi.localIP().toString() + ":" + String(getWebPort()));
 }
@@ -125,7 +125,7 @@ void updateWebConfig(uint16_t port, const String &user, const String &pass) {
  * Periodically cleans up inactive WebSocket clients and performs background maintenance.
  */
 void vWebMonitorTask(void *pvParameters) {
-    waiting_on_event(NETWORK_EVENT, NET_STATE_WIFI_STA, portMAX_DELAY);
+    core_state_wait(g_wifi_state_group, (uint8_t)WIFI_STATE_STA, portMAX_DELAY);
     loadWebConfig();	
     setupWebServer();
     for (;;) {
@@ -133,3 +133,16 @@ void vWebMonitorTask(void *pvParameters) {
         vTaskDelay(pdMS_TO_TICKS(5000));
     }
 }
+
+void web_server_task_start(void) {
+    xTaskCreatePinnedToCore(
+        vWebMonitorTask,
+        "WebMonitorTask",
+        4096,
+        NULL,
+        3,
+        NULL,
+        1
+    );
+}
+

@@ -1,5 +1,7 @@
 /*---- INCLUDES ----*/
 #include "core/core_log.h"
+#include <esp_attr.h>
+#include <esp_system.h>
 #include <cstring>
 
 /*---- CONFIGURATION ----*/
@@ -82,6 +84,25 @@ static TaskHandle_t logTaskHandle = NULL;
 #define MAX_LOG_CALLBACKS 5
 static LogOutputCallback logCallbacks[MAX_LOG_CALLBACKS] = {NULL};
 
+/**
+ * @brief Ring of the most recent log lines, kept in RTC no-init memory.
+ * @note Not cleared on a software/panic reboot, so after a crash it still holds the lines
+ *       logged just before it. Lines are stored as text ending with '\n'; when full, the
+ *       oldest bytes are overwritten. head is also the position of the oldest byte.
+ */
+typedef struct {
+    uint32_t head;                        /* Next byte to write; masked before use (may be garbage) */
+    char     buf[CORE_LOG_HISTORY_SIZE];
+} LogHistory_t;
+
+static RTC_NOINIT_ATTR LogHistory_t logHistory;
+
+/**
+ * @brief Guards logHistory. A spinlock, not a mutex: the critical section is a short RAM copy
+ *        that never blocks, and logs can come from both cores at once.
+ */
+static portMUX_TYPE logHistoryLock = portMUX_INITIALIZER_UNLOCKED;
+
 /*---- STATIC HELPER FUNCTIONS ----*/
 
 /**
@@ -132,6 +153,37 @@ static void core_log_dispatch(const char *text, LogLevel level)
 }
 
 /**
+ * @brief Appends one line ("<level letter> <msg>\n") to the history ring.
+ * @param msg   NUL-terminated message text; at most LOG_MSG_MAX_LEN - 1 chars are kept.
+ * @param level Severity, stored as a one-letter prefix (D/I/W/E).
+ * @note Runs on the caller's task, synchronously, so a line is in RTC memory before LOG()
+ *       returns - even if the system crashes right after.
+ */
+static void core_log_history_append(const char *msg, LogLevel level)
+{
+    static const char levelChar[] = { 'D', 'I', 'W', 'E' };
+    char prefix = ((unsigned)level < sizeof(levelChar)) ? levelChar[level] : '?';
+    const uint32_t mask = CORE_LOG_HISTORY_SIZE - 1;
+
+    portENTER_CRITICAL_SAFE(&logHistoryLock);
+    uint32_t head = logHistory.head & mask; /* head comes from no-init memory: never index past buf */
+
+    logHistory.buf[head] = prefix;
+    head = (head + 1) & mask;
+    logHistory.buf[head] = ' ';
+    head = (head + 1) & mask;
+    for (size_t i = 0; msg[i] != '\0' && i < LOG_MSG_MAX_LEN - 1; i++) {
+        logHistory.buf[head] = msg[i];
+        head = (head + 1) & mask;
+    }
+    logHistory.buf[head] = '\n';
+    head = (head + 1) & mask;
+
+    logHistory.head = head;
+    portEXIT_CRITICAL_SAFE(&logHistoryLock);
+}
+
+/**
  * @brief Dispatch task body: the single consumer that drains the log queue forever.
  * @param pvParameters Unused (required by the FreeRTOS task-function signature).
  *
@@ -171,6 +223,17 @@ void core_log_init()
 {
     // Start hardware serial for standard log output.
     Serial.begin(115200);
+
+    // RTC no-init memory holds garbage after power-on: start the history empty. Other resets
+    // (panic, watchdog, software) keep it, so the lines before a crash are still there.
+    if (esp_reset_reason() == ESP_RST_POWERON) {
+        portENTER_CRITICAL(&logHistoryLock);
+        memset(logHistory.buf, 0, sizeof(logHistory.buf));
+        logHistory.head = 0;
+        portEXIT_CRITICAL(&logHistoryLock);
+    }
+    // Mark where this run starts, so the previous run's last lines are easy to tell apart
+    core_log_history_append("----- boot -----", LOG_LEVEL_INFO);
 
     // Create the queue once (guard so a second core_log_init() call, if it
     // ever happens, doesn't leak/replace an already-running queue).
@@ -260,6 +323,9 @@ void core_log_print(const char *msg, LogLevel level)
     // messages never even take up a queue slot.
     if (level < currentLogLevel) return;
 
+    // Keep it in the RTC history first, synchronously: a crash right after this call must not lose it
+    core_log_history_append(msg, level);
+
     // Fallback path: the queue/dispatch task isn't up yet - e.g. this is a
     // very early LOG() call before setup() runs core_log_init(), or
     // core_log_init()'s task creation failed earlier. Print synchronously,
@@ -307,4 +373,36 @@ void core_log_print(const String &msg, LogLevel level)
     // String's existing buffer (no extra copy here), which the const
     // char* overload above then copies into the fixed-size queue entry.
     core_log_print(msg.c_str(), level);
+}
+
+/**
+ * @brief Copies the recent log history (oldest line first) into a buffer.
+ */
+size_t core_log_history_read(char *out, size_t size)
+{
+    if (out == NULL || size == 0) return 0;
+
+    const uint32_t mask = CORE_LOG_HISTORY_SIZE - 1;
+    size_t len = 0;
+
+    // Under the lock so a line logged meanwhile is not half copied (about 2 KB, read once at boot)
+    portENTER_CRITICAL(&logHistoryLock);
+    uint32_t start = logHistory.head & mask;
+
+    // A non-zero byte at the oldest position means the ring has wrapped and its first line was
+    // partly overwritten: skip up to the end of that line
+    uint32_t i = 0;
+    if (logHistory.buf[start] != '\0') {
+        while (i < CORE_LOG_HISTORY_SIZE && logHistory.buf[(start + i) & mask] != '\n') i++;
+        i++; /* past the '\n' */
+    }
+
+    for (; i < CORE_LOG_HISTORY_SIZE && len < size - 1; i++) {
+        char c = logHistory.buf[(start + i) & mask];
+        if (c != '\0') out[len++] = c; /* zero bytes are the unused part after a power-on clear */
+    }
+    portEXIT_CRITICAL(&logHistoryLock);
+
+    out[len] = '\0';
+    return len;
 }

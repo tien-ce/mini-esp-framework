@@ -1,5 +1,6 @@
 /*---- INCLUDES ----*/
 #include "core/file_system.h"
+#include "config.h"
 #include "core/core_log.h"
 #include "chashmap.h"
 #include <LittleFS.h>
@@ -104,13 +105,14 @@ static void dentry_make_key(char *out_buf, size_t buf_len, const dentry_t *paren
  * @note free_func on s_dentry_table is NULL, so an overwrite never frees the old
  *       payload automatically - callers must never re-store a pointer that is
  *       already the current value for that key (see dentry_move()).
+ * @return true if indexed; false on allocation failure (the caller still owns `entry`).
  */
-static void dentry_table_store(dentry_t *entry)
+static bool dentry_table_store(dentry_t *entry)
 {
-    if (!s_dentry_table || !entry) return;
+    if (!s_dentry_table || !entry) return false;
     char key[MAX_KEY];
     dentry_make_key(key, sizeof(key), entry->parent, entry->name);
-    chashmap_set(s_dentry_table, key, entry);
+    return chashmap_set(s_dentry_table, key, entry);
 }
 
 /**
@@ -313,7 +315,12 @@ static dentry_t *dentry_resolve_parent(const char *path, char *out_name, size_t 
                 return NULL;
             }
             dentry_link_child(current, child);
-            dentry_table_store(child);
+            if (!dentry_table_store(child)) {
+                // An unindexed node would be missed by lookups and linked twice.
+                dentry_evict(child);
+                buf[i] = saved;
+                return NULL;
+            }
         }
 
         buf[i] = saved; // Restore the separator before continuing the walk.
@@ -349,7 +356,10 @@ static dentry_t *dentry_get_or_create(const char *path, bool is_dir_hint)
     if (!entry) return NULL;
 
     dentry_link_child(parent, entry);
-    dentry_table_store(entry);
+    if (!dentry_table_store(entry)) {
+        dentry_evict(entry);
+        return NULL;
+    }
     return entry;
 }
 
@@ -417,7 +427,10 @@ static void dentry_move(const char *path_from, const char *path_to)
     entry->parent = new_parent;
 
     dentry_link_child(new_parent, entry);
-    dentry_table_store(entry);
+    if (!dentry_table_store(entry)) {
+        // Drop it from the cache; the next access re-probes LittleFS.
+        dentry_evict(entry);
+    }
 }
 
 /*---- PUBLIC FUNCTIONS ----*/
@@ -473,7 +486,7 @@ bool file_system_init(bool formatonfail, const char *basepath, uint8_t maxopenfi
     //    never implicitly by the hashmap (see dentry_table_store()'s note on
     //    why an automatic free-on-overwrite would be unsafe here).
     if (s_dentry_table == NULL) {
-        s_dentry_table = chashmap_create(DENTRY_HASH_INITIAL_CAPACITY, NULL);
+        s_dentry_table = chashmap_create(DENTRY_HASH_INITIAL_CAPACITY, NULL, NULL, NULL, NULL);
         if (s_dentry_table == NULL) {
             LOG_ERROR_STR("File system initialized failed, can't initialize dentry table");
             return false;
@@ -730,7 +743,10 @@ FsResult_t list_file(const char *dir_path, char **out_json)
                 child = dentry_alloc(fullname.c_str(), child_is_dir, dir_entry);
                 if (child) {
                     dentry_link_child(dir_entry, child);
-                    dentry_table_store(child);
+                    if (!dentry_table_store(child)) {
+                        dentry_evict(child);
+                        child = NULL;
+                    }
                 }
             }
             if (child) {

@@ -1,8 +1,12 @@
 #include "core/info.h"
+#include "config.h"
 #include <Arduino.h>
 #include <esp_chip_info.h>
 #include <esp_mac.h>
+#include <esp_system.h>
+#include <esp_heap_caps.h>
 #include <stdio.h>
+#include <string.h>
 
 /* -------------------------------------------------------------------------- */
 /*                              STATIC VARIABLES                              */
@@ -13,6 +17,21 @@ static esp_device_info_t s_device_info = {
     "00:00:00:00:00:00",
     false
 };
+
+/*
+ * The linker puts .rodata_custom_desc right after esp_app_desc_t, so this lands at
+ * FW_DESC_BIN_OFFSET of firmware.bin. "used" keeps it even if no code reads it
+ * (--gc-sections would drop it otherwise).
+ */
+static const fw_desc_t s_fw_desc __attribute__((section(".rodata_custom_desc"), used)) = {
+    FW_DESC_MAGIC,
+    FW_DESC_NAME,
+    FW_VERSION_STR,
+    BOARD_NAME
+};
+
+/* Room for the NUL: OTA compares the field as a string */
+static_assert(sizeof(BOARD_NAME) <= FW_DESC_BOARD_LEN, "BOARD_NAME is too long for fw_desc_t.board");
 
 /* -------------------------------------------------------------------------- */
 /*                              STATIC FUNCTIONS                              */
@@ -67,6 +86,15 @@ const char* esp_info_get_model(void) {
     return s_device_info.model;
 }
 
+const char* esp_info_get_chip_short(void) {
+    const char *model = esp_info_get_model();
+    /* "ESP32-S3" -> "S3"; plain "ESP32" and the generic fallback stay "ESP32" */
+    if (strncmp(model, "ESP32-", 6) == 0 && strcmp(model + 6, "Generic") != 0) {
+        return model + 6;
+    }
+    return "ESP32";
+}
+
 const char* esp_info_get_mac_str(void) {
     if (!s_device_info.is_loaded) esp_info_load();
     return s_device_info.mac_str;
@@ -76,10 +104,78 @@ const char* esp_info_get_fw_version(void) {
     return FW_VERSION_STR;
 }
 
+const fw_desc_t* esp_info_get_fw_desc(void) {
+    return &s_fw_desc;
+}
+
 uint32_t esp_info_get_uptime_sec(void) {
     return (uint32_t)(millis() / 1000);
 }
 
 uint32_t esp_info_get_free_heap(void) {
     return ESP.getFreeHeap();
+}
+
+uint32_t esp_info_get_total_heap(void) {
+    return ESP.getHeapSize();
+}
+
+uint32_t esp_info_get_min_free_heap(void) {
+    return ESP.getMinFreeHeap();
+}
+
+uint32_t esp_info_get_max_alloc_heap(void) {
+    return (uint32_t)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+}
+
+float esp_info_get_chip_temp(void) {
+    return temperatureRead();
+}
+
+const char* esp_info_get_reset_reason(void) {
+    switch (esp_reset_reason()) {
+        case ESP_RST_POWERON:   return "POWERON";
+        case ESP_RST_EXT:       return "EXTERNAL";
+        case ESP_RST_SW:        return "SOFTWARE";
+        case ESP_RST_PANIC:     return "PANIC";
+        case ESP_RST_INT_WDT:   return "INT_WDT";
+        case ESP_RST_TASK_WDT:  return "TASK_WDT";
+        case ESP_RST_WDT:       return "WDT";
+        case ESP_RST_DEEPSLEEP: return "DEEPSLEEP";
+        case ESP_RST_BROWNOUT:  return "BROWNOUT";
+        case ESP_RST_SDIO:      return "SDIO";
+        default:                return "UNKNOWN";
+    }
+}
+
+bool esp_info_has_psram(void) {
+#ifdef SYSTEM_USES_PSRAM
+    return psramFound();
+#else
+    return false;
+#endif
+}
+
+uint32_t esp_info_get_free_psram(void) {
+#ifdef SYSTEM_USES_PSRAM
+    return ESP.getFreePsram();
+#else
+    return 0;
+#endif
+}
+
+uint32_t esp_info_get_total_psram(void) {
+#ifdef SYSTEM_USES_PSRAM
+    return ESP.getPsramSize();
+#else
+    return 0;
+#endif
+}
+
+uint32_t esp_info_get_flash_size(void) {
+    return ESP.getFlashChipSize();
+}
+
+const char* esp_info_get_sdk_version(void) {
+    return ESP.getSdkVersion();
 }

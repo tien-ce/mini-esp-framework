@@ -42,7 +42,25 @@ typedef enum {
 
 } Signal_t;
 
+/** @brief Asynchronous dispatch: notifies the dispatcher task and returns immediately (signals may be merged). */
 void dispatch_signal(Signal_t signal);
+
+/**
+ * @brief Synchronous dispatch: runs every module's handler for the signal in the CALLER's task and returns when all are done.
+ * @details No lock is taken: each module is responsible for the thread safety of its own handler. Handlers must only copy
+ *          data (no delay, no slow I/O). Does nothing until the dispatcher has finished SIG_INIT for all modules.
+ * @param signal Signal to dispatch.
+ */
+void dispatch_signal_sync(Signal_t signal);
+
+/** Hook called after the module handlers of a signal ran (used to forward the signal to script handlers). */
+typedef void (*DispatchHook_t)(Signal_t signal, bool sync);
+
+/**
+ * @brief Installs the hook that is called for every dispatched signal after the Xdrv/Xsns/Xadp handlers.
+ * @param hook Function to call (sync is true when the signal came from dispatch_signal_sync), or nullptr to remove it.
+ */
+void dispatcher_set_hook(DispatchHook_t hook);
 
 /** @brief Initialize hardware timer interrupt for signal generation */
 void dispatcher_init(void);

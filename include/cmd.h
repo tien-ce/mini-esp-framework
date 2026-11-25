@@ -10,6 +10,8 @@
 #define CMD_RESTART         "ESP32_RESTART"
 #define CMD_BACKLOG         "BACKLOG"
 #define CMD_RULE            "RULE"
+#define CMD_CRASH_TEST      "CRASH_TEST"
+#define CMD_CRASH_TYPES     "CRASH_TYPES"
 
 // ============================================================================
 // 2. WIFI COMMANDS
@@ -24,7 +26,19 @@
 #define CMD_WIFI_STATUS     "WIFI_STATUS"
 
 // ============================================================================
-// 3. DRIVER COMMANDS
+// 3. MQTT COMMANDS
+// ============================================================================
+#define CMD_MQTT_DATA_TOPIC "DATA_TOPIC"
+#define CMD_MQTT_RPC_TOPIC  "DATA_RPC"
+#define CMD_MQTT_SERVER     "MQTT_SERVER"
+#define CMD_MQTT_PORT       "MQTT_PORT"
+#define CMD_MQTT_USER       "MQTT_USER"
+#define CMD_MQTT_PASSWORD   "MQTT_PASSWORD"
+#define CMD_MQTT_INTERVAL   "MQTT_INTERVAL"
+#define CMD_MQTT_STATUS     "MQTT_STATUS"
+
+// ============================================================================
+// 4. DRIVER COMMANDS
 // ============================================================================
 // Relay Driver (xdrv_02_relay.cpp)
 #define RELAY1_CMD          "RELAY1"
@@ -32,7 +46,7 @@
 #define RELAY3_CMD          "RELAY3"
 
 // ============================================================================
-// 4. SENSOR COMMANDS
+// 5. SENSOR COMMANDS
 // ============================================================================
 // Sensor specific command definitions can be added here
 
