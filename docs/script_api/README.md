@@ -36,6 +36,7 @@ Reading a name tells you what it is:
 | [`storage`](modules/storage/README.md) | Data that survives a restart | [`NVS()`](modules/storage/nvs.md), [`FILE()`](modules/storage/file.md) | none |
 | [`ipc`](modules/ipc/README.md) | Links between scripts | [`QUEUE()`](modules/ipc/queue.md) | none |
 | [`system`](modules/system/README.md) | Device, time, scripts, firmware signals | none | device info, uptime, run / stop, signals |
+| [`network`](modules/network/README.md) | Requests to other machines | [`HTTP()`](modules/network/http.md) | none |
 
 Functions that need no import (`print`, `delay`, `http_post`, `mqtt_update`, ...) are in [Global functions](global_functions.md).
 
@@ -48,6 +49,7 @@ Runnable scripts for each module are in [`examples/`](../../examples).
 - **Released automatically.** When the last value pointing to a handle is gone (out of scope, script ended or stopped), the resource is closed.
 - **Copies share the object.** After `handle b = a;`, both names use the same port.
 - **A port has one owner.** A UART port used by a `uart` handle cannot be opened by a `modbus` handle at the same time. Queues are the exception: they are meant to be shared by name.
+- **Waiting is not blocking.** `http.get`, `http.post` and `modbus.request` wait for their answer, but callbacks (signal handlers, `on_receive`, `on_done`) still run meanwhile. A callback must not use the handle the main code is waiting on: that raises an error. See [`http`](modules/network/http.md#waiting-is-not-blocking) and [`modbus`](modules/hardware/modbus.md#waiting-is-not-blocking).
 
 ## How errors are reported
 

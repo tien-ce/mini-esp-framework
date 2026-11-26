@@ -15,6 +15,7 @@ handle mb = hw.MODBUS();         // created closed
 ## Attributes
 
 Read only. They hold the settings of the last successful `open()`, and read `0` before the first one.
+Reading them while a `request` runs on this handle raises an error (see [Waiting is not blocking](#waiting-is-not-blocking)).
 
 | Attribute | Type | Meaning |
 | :--- | :--- | :--- |
@@ -65,11 +66,27 @@ int third_bit = data[2 * 2 + 1];
 ```
 
 The script waits until the answer arrives or `timeout_ms` passes. An answer holds at most 125 values.
+One request at a time per handle.
+
+## Waiting is not blocking
+
+`request` waits from the script's point of view only: the next line runs after the answer arrived or `timeout_ms` passed. While it waits, the script **still runs its callbacks**: signal handlers, `uart.on_receive` handlers, `on_done` of [`http`](../network/http.md) requests, and calls from other scripts. A callback can therefore run in the middle of `mb.request(...)`.
+
+**Do not use a `modbus` handle in a callback while the main code may be waiting on that same handle.** The handle is busy, so in the callback:
+
+- `request` raises "a request is already running on this modbus"
+- `close` raises "a request is running on this modbus"
+- reading or writing any attribute raises
+
+Use a separate handle on another port in the callback, or only set a variable there and do the request in the main loop.
+
+When the script is stopped during `request`, the stop takes effect once the request ended, at most `timeout_ms`. `request` then returns `null`.
 
 ## Errors
 
 | Case | Result |
 | :--- | :--- |
+| `request`, `close` or an attribute is used while a request runs on this handle | Raises |
 | Port, baud, frame, slave, address, quantity or timeout out of range | Raises |
 | `function` is not `1..4` (every write included) | Raises, nothing is sent |
 | `request` or `close` on a closed `modbus`, `open` on an already open one | Raises |
