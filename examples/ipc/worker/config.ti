@@ -1,0 +1,10 @@
+/*
+ * config.ti
+ * Settings shared by main.ti and worker.ti.
+ * worker_path must match the folder this example is uploaded to on the board.
+ */
+
+string request_queue    = "demo_req";     // main -> worker: int number
+string reply_queue      = "demo_reply";   // worker -> main: {"number": int, "doubled": int}
+string worker_path      = "/examples/ipc/worker/worker.ti";
+int    reply_timeout_ms = 2000;

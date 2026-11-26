@@ -1,4 +1,4 @@
-#include "built_in.h"
+#include "scripting/builtins/built_in.h"
 #include "services/mqtt/mqtt_task.h"
 #include "TienInterpreter.h"
 #include "core/core_log.h"
@@ -10,8 +10,8 @@
 static value_t *built_in_is_none(ti_handle_t handle, value_t **argv, int argc)
 {
     if (argc != 1 || argv == NULL) {
-        ti_log("[ERROR] %s: Expect 1 variable \n", BUILTIN_IS_NONE);
-        ti_fatal();
+        ti_raise_error(handle, TI_ERR_INVALID_ARG, "%s: Expect 1 variable", BUILTIN_IS_NONE);
+        return NULL;
     }
     if (argv[0] == NULL || argv[0]->type == VAL_NULL)
     {
@@ -26,8 +26,8 @@ static value_t *built_in_is_none(ti_handle_t handle, value_t **argv, int argc)
 /** @brief Built-in delay function to pause script execution for N milliseconds. */
 static value_t *built_in_delay(ti_handle_t handle, value_t **argv, int argc) {
     if (argc != 1 || argv == NULL || argv[0] == NULL) {
-        ti_log("[ERROR] %s: Invalid argument count, expect 1\n", BUILTIN_DELAY);
-        ti_fatal();
+        ti_raise_error(handle, TI_ERR_INVALID_ARG, "%s: Invalid argument count, expect 1", BUILTIN_DELAY);
+        return NULL;
     }
     // ti_wait releases the runtime lock while sleeping, so events, dispatcher handlers and ti_call callers keep running.
     // Its status (TI_ERR_INTERRUPTED when the script is stopped, stale handle) needs no handling: the script ends by itself.
@@ -43,9 +43,8 @@ static value_t *built_in_delay(ti_handle_t handle, value_t **argv, int argc) {
             }
             break;
         default:
-            ti_log("[ERROR] %s: Unexpected type %d\n", BUILTIN_DELAY, argv[0]->type);
-            ti_fatal();
-            break;
+            ti_raise_error(handle, TI_ERR_TYPE_MISMATCH, "%s: Unexpected type %d", BUILTIN_DELAY, argv[0]->type);
+            return NULL;
     }
     return val_new_null();
 }

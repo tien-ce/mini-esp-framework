@@ -1,4 +1,4 @@
-#include "built_in.h"
+#include "scripting/builtins/built_in.h"
 #include "TienInterpreter.h"
 #include "core/core_log.h"
 #include <Arduino.h>
@@ -34,8 +34,8 @@ static String format_log_args(const char *fn_name, value_t **argv, int argc) {
                 buffer += "null";
                 break;
             default:
-                ti_log("[ERROR] %s: Unexpected type %d\n", fn_name, argv[i]->type);
-                ti_fatal();
+                /* No handle here to raise with: print a placeholder and keep going */
+                buffer += "<" + String(fn_name) + ": unprintable type " + String((int)argv[i]->type) + ">";
                 break;
         }
     }

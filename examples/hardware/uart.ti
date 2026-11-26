@@ -1,0 +1,16 @@
+import hardware as hw;
+
+void do_something(bytes msg)
+{
+      print(bytes_to_string(msg));
+}
+
+handle uart = hw.UART();
+print(uart.open(1,9600,hw.SERIAL_8N1));
+uart.on_receive(do_something);
+while(true)
+{
+      uart.write("Hello world\n");
+      delay(1000);
+}
+uart.close();

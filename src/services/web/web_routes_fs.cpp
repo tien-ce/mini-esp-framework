@@ -51,28 +51,31 @@ static String normalize_fs_path(const String &rawPath) {
 }
 
 /** @brief Maps a file_system.h FsResult_t to the appropriate HTTP status code and sends it. */
-static void send_fs_error(AsyncWebServerRequest *request, FsResult_t result) {
-    int httpCode;
+static int fs_http_code(FsResult_t result) {
     switch (result) {
         case FS_ERR_NOT_FOUND:
-            httpCode = 404;
-            break;
+            return 404;     /* Not Found: the path (or the parent folder of a write) does not exist */
         case FS_ERR_IS_DIRECTORY:
         case FS_ERR_NOT_A_DIRECTORY:
-        case FS_ERR_ALREADY_EXISTS:
         case FS_ERR_INVALID_ARG:
-            httpCode = 400;
-            break;
-        case FS_ERR_NOT_MOUNTED:
-        case FS_ERR_OPEN_FAILED:
-        case FS_ERR_ALLOC_FAILED:
+            return 400;     /* Bad Request: the path is the wrong kind for this operation */
+        case FS_ERR_ALREADY_EXISTS:
+        case FS_ERR_NOT_EMPTY:
+            return 409;     /* Conflict: the target already exists, or the folder to delete is not empty */
         case FS_ERR_WRITE_INCOMPLETE:
+            return 507;     /* Insufficient Storage: flash is full */
+        case FS_ERR_NOT_MOUNTED:
+        case FS_ERR_ALLOC_FAILED:
+            return 503;     /* Service Unavailable: file system not mounted or out of memory, may recover */
+        case FS_ERR_OPEN_FAILED:
         case FS_ERR_OPERATION_FAILED:
         default:
-            httpCode = 500;
-            break;
+            return 500;
     }
-    request->send(httpCode, "text/plain", file_system_strerror(result));
+}
+
+static void send_fs_error(AsyncWebServerRequest *request, FsResult_t result) {
+    request->send(fs_http_code(result), "text/plain", file_system_strerror(result));
 }
 
 /**
@@ -139,7 +142,16 @@ static void handleFSList(AsyncWebServerRequest *request) {
 
     String dirPath = "/";
     if (request->hasParam("dir")) {
-        dirPath = request->getParam("dir")->value();
+        dirPath = normalize_fs_path(request->getParam("dir")->value());
+    }
+
+    /* List first: a missing folder is 404 and a file path is 400, not an empty 200 */
+    char *rawListJson = NULL;
+    FsResult_t result = list_file(dirPath.c_str(), &rawListJson);
+    if (result != FS_OK || rawListJson == NULL) {
+        free(rawListJson);
+        send_fs_error(request, result != FS_OK ? result : FS_ERR_OPERATION_FAILED);
+        return;
     }
 
     JsonDocument doc;
@@ -153,13 +165,8 @@ static void handleFSList(AsyncWebServerRequest *request) {
      * 2. Transformation/Mapping Mechanism (Lazy Loading):
      *    - We use `serialized()` to directly inject the JSON array string without double-deserialization.
      */
-    char *rawListJson = NULL;
-    if (list_file(dirPath.c_str(), &rawListJson) == FS_OK && rawListJson != NULL) {
-        /* embeded directly the rawListjson(json string (zero parsing)) in to document doc[files] */ 
-        doc["files"] = serialized(rawListJson); // This function only copy the address 
-    } else {
-        doc["files"] = doc.to<JsonArray>();
-    }
+    /* embeded directly the rawListjson(json string (zero parsing)) in to document doc[files] */
+    doc["files"] = serialized(rawListJson); // This function only copy the address
 
     String responsePayload;
     serializeJson(doc, responsePayload);
@@ -202,10 +209,8 @@ static void handleFSRead(AsyncWebServerRequest *request) {
  * @param[in] request Pointer to AsyncWebServerRequest object from client.
  */
 static void handleFSSaveRequest(AsyncWebServerRequest *request) {
-    if (!web_authenticate(request)) {
-        request->send(401, "text/plain", "Unauthorized");
-        return;
-    }
+    /* web_authenticate() already sent the 401 challenge */
+    if (!web_authenticate(request)) return;
     UploadContext *ctx = (UploadContext*)request->_tempObject; // Get accumulated context from handleFSSaveBody
 
     /*
@@ -222,7 +227,12 @@ static void handleFSSaveRequest(AsyncWebServerRequest *request) {
      * of AsyncWebServer continues to fire, it will see request->_tempObject == nullptr and ignore it.
      */
     // Check the integrity of the buffer and the received data size
-    if (!ctx || !ctx->buffer || ctx->received_size != ctx->total_size) {
+    if (!ctx) {
+        /* No body chunk ever arrived: the client sent an empty POST (or the buffer allocation failed in the body callback) */
+        request->send(400, "text/plain", "Missing request body");
+        return;
+    }
+    if (!ctx->buffer || ctx->received_size != ctx->total_size) {
         request->send(500, "text/plain", "Upload failed or memory allocation error");
         if (ctx) {
             delete ctx;
@@ -237,7 +247,8 @@ static void handleFSSaveRequest(AsyncWebServerRequest *request) {
       JsonDocument doc;
   #endif
     DeserializationError err = deserializeJson(doc, (const char*)ctx->buffer, ctx->total_size);
-    if (err || !doc.containsKey("path") || !doc.containsKey("content")) {
+    /* path and content must both be strings: a null or numeric content would make strlen() crash below */
+    if (err || !doc["path"].is<const char*>() || !doc["content"].is<const char*>()) {
         delete ctx;
         request->_tempObject = nullptr; // Reset pointer before sending error response
         request->send(400, "text/plain", "Invalid JSON payload or missing path/content");
@@ -271,10 +282,7 @@ static void handleFSSaveBody(AsyncWebServerRequest *request, uint8_t *data, size
 
 /** @brief Handles HTTP POST request for renaming a file ("/api/fs/rename"). */
 static void handleFSRenameRequest(AsyncWebServerRequest *request) {
-    if (!web_authenticate(request)) {
-        request->send(401, "text/plain", "Unauthorized");
-        return;
-    }
+    if (!web_authenticate(request)) return;
 
     if (!request->hasParam("path") || !request->hasParam("new_path")) {
         request->send(400, "text/plain", "Missing 'path' or 'new_path' parameter");
@@ -293,10 +301,7 @@ static void handleFSRenameRequest(AsyncWebServerRequest *request) {
 }
 
 static void handleFSDeleteRequest(AsyncWebServerRequest *request) {
-    if (!web_authenticate(request)) {
-        request->send(401, "text/plain", "Unauthorized");
-        return;
-    }
+    if (!web_authenticate(request)) return;
 
     if (!request->hasParam("path")) {
         request->send(400, "text/plain", "Missing 'path' parameter");
@@ -305,7 +310,11 @@ static void handleFSDeleteRequest(AsyncWebServerRequest *request) {
 
     String path = normalize_fs_path(request->getParam("path")->value());
 
+    /* A file is removed directly; a path that is a folder goes to remove_dir() (empty folders only, not recursive) */
     FsResult_t result = remove_file(path.c_str());
+    if (result == FS_ERR_IS_DIRECTORY) {
+        result = remove_dir(path.c_str());
+    }
     if (result != FS_OK) {
         send_fs_error(request, result);
         return;
@@ -314,10 +323,7 @@ static void handleFSDeleteRequest(AsyncWebServerRequest *request) {
 }
 
 static void handleFSMkdirRequest(AsyncWebServerRequest *request) {
-    if (!web_authenticate(request)) {
-        request->send(401, "application/json", "{\"status\": \"error\"}");
-        return;
-    }
+    if (!web_authenticate(request)) return;
 
     if (!request->hasParam("path")) {
         request->send(400, "application/json", "{\"status\": \"error\"}");
@@ -328,7 +334,8 @@ static void handleFSMkdirRequest(AsyncWebServerRequest *request) {
 
     FsResult_t result = make_directory(path.c_str());
     if (result != FS_OK) {
-        request->send(500, "application/json", "{\"status\": \"error\"}");
+        /* Same status mapping as the other routes (409 when the folder already exists) */
+        request->send(fs_http_code(result), "application/json", "{\"status\": \"error\"}");
         return;
     }
     request->send(200, "application/json", "{\"status\": \"success\"}");

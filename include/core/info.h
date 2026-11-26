@@ -7,7 +7,7 @@
 
 #define CHIP_MODEL_STR_MAX_LEN 16
 #define MAC_STR_LEN            18
-#define FW_VERSION_STR         "3.1.1"
+#define FW_VERSION_STR         "4.0.0"
 
 /* Firmware descriptor: identifies a mini-esp-framework image (see fw_desc_t) */
 #define FW_DESC_MAGIC          0x4D455346u    /* "FSEM" in memory: marks that the descriptor is present */

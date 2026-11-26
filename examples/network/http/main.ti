@@ -1,0 +1,37 @@
+/*
+ * main.ti
+ * HTTP requests with one http handle: sync GET and POST, then an async GET.
+ *
+ * How to run: fill in config.ti, upload this folder to /examples/network/http/ on the board, then run main.ti.
+ * The result of a request is in http.code (HTTP status, or negative on failure) and http.payload.
+ */
+
+import network;
+import config;
+
+// Called when the async GET ended. h is the http handle that made the request
+void on_get_done(handle h) {
+    print("Async GET ", h.code, ": ", h.payload);
+}
+
+// One handle keeps its connection between requests to the same server
+handle http = network.HTTP();
+http.timeout_ms = config.timeout_ms;
+
+// 1. Sync GET: the script waits here until the request ended
+http.get(config.get_url + "?ip=" + config.query_ip);
+print("GET ", http.code, ": ", http.payload);
+
+// 2. Sync POST: Content-Type comes from http.content_type ("application/json" by default)
+http.post(config.post_url, config.post_body);
+print("POST ", http.code, ": ", http.payload);
+
+// 3. Async GET: returns at once, on_get_done(http) runs when the request ended.
+//    Reading http.code or http.payload before that is an error (a request is running)
+http.get_async(config.get_url + "?ip=" + config.query_ip, on_get_done);
+print("Async GET sent");
+
+// Keep the script running so the callback can be called
+while (true) {
+    delay(1000);
+}

@@ -1,5 +1,4 @@
-#include "built_in.h"
-#include "built_in.h"
+#include "scripting/builtins/built_in.h"
 #include "TienInterpreter.h"
 #include "core/core_log.h"
 #include <ArduinoJson.h>
@@ -7,8 +6,9 @@
 /** @brief Static helper to validate arguments, parse JSON string, and extract a JsonVariant for a given key. */
 static bool parse_json_and_get_element(value_t **argv, int argc, const char *func_name, JsonDocument &doc, JsonVariant &out_variant) {
     if (argc != 2 || argv == NULL || argv[0] == NULL || argv[1] == NULL || argv[0]->type != VAL_STRING || argv[1]->type != VAL_STRING) {
+        /* No handle here to raise with: log and return null to the script */
         ti_log("[ERROR] %s: Expect 2 string arguments (json_string, key)\n", func_name);
-        ti_fatal();
+        return false;
     }
 
     const char *json_str = argv[0]->string_val;

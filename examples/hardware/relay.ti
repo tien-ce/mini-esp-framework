@@ -1,0 +1,18 @@
+/*
+ * relay.ti
+ * Toggle relay 1 every second and print its state.
+ * Needs a firmware built with USE_RELAY and a board with relay 1 configured.
+ */
+
+import hardware as hw;
+
+int relay = 1;
+
+// Start from a known state. The state can be "ON" / "OFF", a bool or an int
+hw.relay_set(relay, "OFF");
+
+while (true) {
+    hw.relay_toggle(relay);
+    print("Relay ", relay, " is on: ", hw.relay_get(relay));
+    delay(1000);
+}

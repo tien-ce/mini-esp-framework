@@ -598,7 +598,7 @@ void vMqttTask(void *pvParameters) {
                 if (mqttMutex != NULL && xSemaphoreTake(mqttMutex, portMAX_DELAY) == pdTRUE) {
                     String jsonBuffer;
                     serializeJson(mqttDoc, jsonBuffer);
-                    LOG_INFO_STR("Mqtt publish: %s",jsonBuffer.c_str());
+                    //LOG_INFO_STR("Mqtt publish: %s",jsonBuffer.c_str());
 
                     if (mqtt_data_topic.length() > 0) {
                         if (!mqttClient.publish(mqtt_data_topic.c_str(), jsonBuffer.c_str())) {

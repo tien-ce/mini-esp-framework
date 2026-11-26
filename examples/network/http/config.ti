@@ -1,0 +1,12 @@
+/*
+ * config.ti
+ * Settings of main.ti: replace the YOUR_... values with your server.
+ */
+
+string get_url    = "http://YOUR_SERVER:PORT/YOUR_GET_PATH";    // GET, query ?ip=... is added by main.ti
+string query_ip   = "YOUR_DEVICE_IP";                            // Value of the query param ip
+string post_url   = "http://YOUR_SERVER:PORT/YOUR_POST_PATH";   // POST, body below
+int    timeout_ms = 5000;                                        // Connect and read timeout, 1 .. 65535
+
+// JSON body of the POST (Content-Type: application/json, the default of http.content_type)
+string post_body = "{\"ip\": \"YOUR_DEVICE_IP\", \"cycle\": 1, \"stations\": [{\"station\": 1, \"status\": 1}]}";

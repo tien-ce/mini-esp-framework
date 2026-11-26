@@ -1,0 +1,27 @@
+/*
+ * device_info.ti
+ * Print the board, the firmware, the memory and the running scripts once.
+ */
+
+import system;
+
+// Fixed facts: they do not change until the next boot
+dict info = system.info();
+print("Model:        ", info["model"]);
+print("Chip:         ", info["chip"]);
+print("Firmware:     ", info["fw_version"]);
+print("SDK:          ", info["sdk_version"]);
+print("Flash size:   ", info["flash_size"], " bytes");
+print("Total heap:   ", info["total_heap"], " bytes");
+print("Total PSRAM:  ", info["total_psram"], " bytes");
+
+// Values of this moment
+print("Free heap:    ", system.free_heap(), " bytes");
+print("Uptime:       ", system.uptime_s(), " s");
+print("Reset reason: ", system.reset_reason());
+
+list string names = system.scripts();
+print("Running scripts: ", names.len());
+for (int i = 0; i < names.len(); i += 1) {
+    print("  ", names[i]);
+}

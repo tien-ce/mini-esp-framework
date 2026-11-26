@@ -42,6 +42,7 @@ esp32_log_*.txt
 esp_log.sh
 fix_and_build.sh
 esp_tool_symlink
+iot_monitor_symlink
 Test_Project_Symlink
 
 # Device & Hardware Test Dumps

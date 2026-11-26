@@ -3,9 +3,9 @@
 #include "core/core_log.h"
 #include "services/logger/log_task.h"
 #include "core/file_system.h"
-#include "built_in.h"
+#include "scripting/builtins/built_in.h"
+#include "scripting/module/module_manager.h"
 #include "TienInterpreter.h"
-#include "built_in.h"
 #include <LittleFS.h>
 #include <HTTPClient.h>
 #include <freertos/semphr.h>
@@ -57,31 +57,6 @@ static void remove_tien_task(tien_task_t *task) {
     xSemaphoreGive(g_tien_tasks_lock);
 }
 
-/** @brief Returns the script descriptor of the calling FreeRTOS task, or NULL if it is not a script task. */
-static tien_task_t *find_current_tien_task(void) {
-    TaskHandle_t self = xTaskGetCurrentTaskHandle();
-    tien_task_t *found = NULL;
-    xSemaphoreTake(g_tien_tasks_lock, portMAX_DELAY);
-    for (int i = 0; i < TI_MAX_RUNTIMES; i++) {
-        if (g_tien_tasks[i] != NULL && g_tien_tasks[i]->rtos_task == self) {
-            found = g_tien_tasks[i];
-            break;
-        }
-    }
-    xSemaphoreGive(g_tien_tasks_lock);
-    /* Only this task frees its own descriptor, so the pointer stays valid after unlocking */
-    return found;
-}
-
-/** @brief Drops a task from the list and frees what it owns (program, source copy, runtime, descriptor). */
-static void release_tien_task(tien_task_t *task) {
-    remove_tien_task(task);
-    if (task->prog != NULL) ti_program_free(task->prog);
-    if (task->handle != TI_INVALID_HANDLE) ti_destroy(task->handle);
-    free(task->source_code);
-    free(task);
-}
-
 /** @brief Validates if given file path has .ti script file extension. */
 static bool has_tien_extension(const char *path) {
     if (path == NULL) return false;
@@ -102,16 +77,99 @@ static void tien_log_callback(const char *fmt, va_list args) {
     LOG_ERROR(buffer);
 }
 
-/** @brief Fatal error callback registered to TienInterpreter to log and terminate task. */
-static void tien_fatal_callback(void) {
-    LOG_ERROR("Interpreter fatal error occurred!");
+/**
+ * @brief Normalize an absolute path in place: drop empty and "." segments, apply ".." to the previous segment.
+ *        "/project/lib/sensor/../../config/config.ti" -> "/project/config/config.ti".
+ * @param path Absolute path (starts with '/'), rewritten in place (never grows: writing stays behind reading).
+ * @return False when ".." goes above "/" or nothing is left.
+ */
+static bool normalize_path(char *path) {
+    size_t r = 0;   /* read index */
+    size_t w = 0;   /* write index: path[0..w) is the result, "/seg/seg" */
+    while (path[r] != '\0') {
+        /* 1. Skip the '/' before the segment, then find its end */
+        while (path[r] == '/') r++;
+        if (path[r] == '\0') break;
+        size_t start = r;
+        while (path[r] != '\0' && path[r] != '/') r++;
+        size_t len = r - start;
 
-    /* This task never returns to interpreter_task, so its cleanup must happen here */
-    tien_task_t *task = find_current_tien_task();
-    if (task != NULL) {
-        release_tien_task(task);
+        /* 2. "." stays in place; ".." removes the last written segment */
+        if (len == 1 && path[start] == '.') continue;
+        if (len == 2 && path[start] == '.' && path[start + 1] == '.') {
+            if (w == 0) return false;                /* above the root */
+            do { w--; } while (path[w] != '/');      /* back to the '/' of the last segment */
+            continue;
+        }
+
+        /* 3. Append "/<segment>" */
+        path[w++] = '/';
+        memmove(path + w, path + start, len);
+        w += len;
     }
-    vTaskDelete(NULL);
+    path[w] = '\0';
+    return w > 0;
+}
+
+/**
+ * @brief Module loader registered to TienInterpreter: 'import <name>;' of a name no native module has.
+ *        The name is a path without ".ti", relative to the directory of the importing file
+ *        ("/" when it has none), or absolute when it starts with '/':
+ *        from "/project/lib/sensor/sensor.ti", 'import ../../config/config;' loads "/project/config/config.ti".
+ *        The path is normalized, so one file always has one path (the library loads a path only once).
+ * @param importer_path Path of the importing file (the main script's task name, or a module path returned here).
+ * @param name Module name written after 'import'.
+ * @param text_out Receives the module source, only on TI_OK (the library frees it with the registered free).
+ * @param path_out Receives the module path, only on TI_OK (the library frees it with the registered free).
+ * @note Plain malloc / free: the library's free is free (with or without PSRAM), which frees any heap.
+ * @return TI_OK, TI_ERR_UNDEFINED if the file does not exist or the path goes above "/" (reported as
+ *         'Unknown module'), TI_ERR_NO_MEMORY, or TI_ERR_RUNTIME for another read error.
+ */
+static ti_status_t tien_module_loader(const char *importer_path, const char *name, char **text_out, char **path_out) {
+    /* 1. Base directory: the importing file's directory, '/' included; "/" when it has none or name is absolute */
+    const char *dir = "/";
+    size_t dir_len = 1;
+    if (name[0] == '/') {
+        dir_len = 0;
+    } else if (importer_path != NULL) {
+        const char *slash = strrchr(importer_path, '/');
+        if (slash != NULL) {
+            dir = importer_path;
+            dir_len = (size_t)(slash - importer_path) + 1;
+        }
+    }
+
+    /* 2. Build "<dir><name>.ti", then resolve "." and ".." */
+    size_t name_len = strlen(name);
+    char *path = (char *)malloc(1 + dir_len + name_len + sizeof(".ti"));   /* 1: leading '/' if dir lacks it */
+    if (path == NULL) return TI_ERR_NO_MEMORY;
+    size_t n = 0;
+    if (dir_len == 0 || dir[0] != '/') path[n++] = '/';
+    memcpy(path + n, dir, dir_len);
+    n += dir_len;
+    memcpy(path + n, name, name_len);
+    n += name_len;
+    memcpy(path + n, ".ti", sizeof(".ti"));   /* '\0' included */
+    if (!normalize_path(path)) {
+        free(path);
+        return TI_ERR_UNDEFINED;
+    }
+
+    /* 3. Read the file; on failure nothing is handed over, so the path is freed here */
+    char *text = NULL;
+    unsigned int text_len = 0;
+    FsResult_t ret = read_file(path, &text, &text_len);
+    if (ret != FS_OK) {
+        free(path);
+        if (ret == FS_ERR_NOT_FOUND)    return TI_ERR_UNDEFINED;
+        if (ret == FS_ERR_ALLOC_FAILED) return TI_ERR_NO_MEMORY;
+        return TI_ERR_RUNTIME;
+    }
+
+    /* 4. The library owns both buffers from here on */
+    *text_out = text;
+    *path_out = path;
+    return TI_OK;
 }
 
 /** @brief CLI command handler for 'tien <filepath.ti>' command. */
@@ -142,25 +200,27 @@ static void tien_stop_cmd(const String &args) {
 static void interpreter_task(void *pvParameters) {
     tien_task_t *task = (tien_task_t *)pvParameters;
     if (task != NULL) {
-        if (task->source_code != NULL && task->handle != TI_INVALID_HANDLE) {
-            /* 1. Compile source code text to AST program (a syntax error ends in tien_fatal_callback) */
-            task->prog = ti_compile(task->source_code);
+        /* 1. Compile; the name is the program's path, handed to the module loader as main_path on 'import'
+         *    (a syntax error is already logged by the library) */
+        ti_program_t *prog = ti_compile(task->source_code, task->name);
 
-            /* Free source code buffer immediately to reclaim memory during execution */
-            free(task->source_code);
-            task->source_code = NULL;
+        /* Free source code buffer immediately to reclaim memory during execution */
+        free(task->source_code);
+        task->source_code = NULL;
 
-            if (task->prog != NULL) {
-                /* 2. Execute program on dedicated runtime instance (a runtime error ends in tien_fatal_callback) */
-                ti_execute(task->handle, task->prog);
-            } else {
-                LOG_ERROR_STR("Compilation failed for script '%s'", task->name);
-            }
+        if (prog != NULL) {
+            /* 2. Run; ti_execute destroys the runtime when it returns (also on a runtime error, already logged) */
+            ti_execute(task->handle, prog);
+            ti_program_free(prog);
+        } else {
+            LOG_ERROR_STR("Compilation failed for script '%s'", task->name);
+            ti_destroy(task->handle);
         }
 
-        /* 3. Free program, runtime and descriptor, and remove the task from the tracking list */
+        /* 3. Remove the task from the tracking list and free the descriptor */
         LOG_INFO("Tien task '" + String(task->name) + "' ended");
-        release_tien_task(task);
+        remove_tien_task(task);
+        free(task);
     }
     /* 4. Task terminates itself cleanly with no held mutexes or leaked memory */
     vTaskDelete(NULL);
@@ -170,35 +230,36 @@ static void interpreter_task(void *pvParameters) {
 /*                              PUBLIC FUNCTIONS                              */
 /* -------------------------------------------------------------------------- */
 
-void tien_run_file(const char *path) {
+bool tien_run_file(const char *path) {
     if (!has_tien_extension(path)) {
         LOG_ERROR(String(path) + " is not a .ti file");
-        return;
+        return false;
     }
     char *buffer = NULL;
     size_t read_bytes = 0;
     FsResult_t ret = read_file(path, &buffer, &read_bytes);
     if (ret != FS_OK) {
         LOG_ERROR("Read error: " + String(file_system_strerror(ret)));
-        return;
+        return false;
     }
     /* Use path like the name of script task */
-    tien_run_script(path, buffer);
+    bool started = tien_run_script(path, buffer);
     free(buffer);
+    return started;
 }
 
-void tien_run_script(const char *name, const char *source_code) {
+bool tien_run_script(const char *name, const char *source_code) {
     /* Check the NULL pointer for safely */
     if (name == NULL || strlen(name) == 0 || source_code == NULL) {
         LOG_ERROR("Invalid script name or source code");
-        return;
+        return false;
     }
 
-    /* Create new task_t to pass to task, copy name and source code to free independently (calloc: prog and rtos_task start NULL) */
+    /* Create new task_t to pass to task, copy name and source code to free independently */
     tien_task_t *task = (tien_task_t *)calloc(1, sizeof(tien_task_t));
     if (task == NULL) {
         LOG_ERROR_STR("Memory allocation failed for task '%s'", name);
-        return;
+        return false;
     }
 
     /* Copy source code and name to avoid depent or the resource passed */
@@ -208,7 +269,7 @@ void tien_run_script(const char *name, const char *source_code) {
     if (task->source_code == NULL) {
         free(task);
         LOG_ERROR_STR("Memory allocation failed for task '%s'", name);
-        return;
+        return false;
     }
 
     /* Create new runtime instance */
@@ -217,23 +278,23 @@ void tien_run_script(const char *name, const char *source_code) {
         free(task->source_code);
         free(task);
         LOG_ERROR_STR("Failed to allocate runtime for task '%s'", name);
-        return;
+        return false;
     }
 
     /* Assign runtime to task (used for cooperative cancellation via ti_stop) */
     task->handle = rt;
 
-    /* Register before the task starts: its fatal callback looks itself up in the list (name check is atomic with it) */
+    /* Register before the task starts, so tien_stop can find it as soon as it runs (name check is atomic with it) */
     if (!add_tien_task(task)) {
         LOG_ERROR_STR("Task '%s' already exists", name);
         ti_destroy(task->handle);
         free(task->source_code);
         free(task);
-        return;
+        return false;
     }
 
-    /* Create new FreeRTOS task to run in background (rtos_task is set before the task can run) */
-    BaseType_t ret = xTaskCreate(interpreter_task, name, 8192, (void*)task, 1, &task->rtos_task);
+    /* Create new FreeRTOS task to run in background */
+    BaseType_t ret = xTaskCreate(interpreter_task, name, 8192, (void*)task, 1, NULL);
 
     /* Check if task creation failed, cleanup all allocated resources to avoid memory leaks */
     if (ret != pdPASS) {
@@ -242,15 +303,16 @@ void tien_run_script(const char *name, const char *source_code) {
         ti_destroy(task->handle);
         free(task->source_code);
         free(task);
-        return;
+        return false;
     }
 
     /* The task may already be finished and freed here, so only use 'name' from now on */
     LOG_INFO("Tien task '" + String(name) + "' created successfully");
+    return true;
 }
 
-void tien_stop(const char *name) {
-    if (name == NULL || strlen(name) == 0) return;
+bool tien_stop(const char *name) {
+    if (name == NULL || strlen(name) == 0) return false;
 
     /* Search for running script task by name; copy the handle because the task may free itself after unlock */
     bool found = false;
@@ -267,7 +329,7 @@ void tien_stop(const char *name) {
 
     if (!found) {
         LOG_ERROR_STR("Task '%s' not found", name);
-        return;
+        return false;
     }
 
     /*
@@ -279,12 +341,27 @@ void tien_stop(const char *name) {
         ti_stop(handle);
         LOG_INFO("Stop requested for Tien task '" + String(name) + "'");
     }
+    return true;
+}
+
+int tien_get_names(char names[][TIEN_NAME_LEN], int max) {
+    int count = 0;
+    xSemaphoreTake(g_tien_tasks_lock, portMAX_DELAY);
+    for (int i = 0; i < TI_MAX_RUNTIMES && count < max; i++) {
+        if (g_tien_tasks[i] != NULL) {
+            /* Same size as tien_task_t.name, which is always terminated */
+            memcpy(names[count], g_tien_tasks[i]->name, TIEN_NAME_LEN);
+            count++;
+        }
+    }
+    xSemaphoreGive(g_tien_tasks_lock);
+    return count;
 }
 
 void tien_init(void) {
     g_tien_tasks_lock = xSemaphoreCreateMutex();
     ti_register_log(tien_log_callback);
-    ti_register_fatal(tien_fatal_callback);
+    ti_register_module_loader(tien_module_loader);   /* before any runtime is created (not locked) */
 
     #ifdef SYSTEM_USES_PSRAM
     // If use psram, run ti script on ps ram (runtime check: the build flag does not prove the chip exists)
@@ -293,6 +370,7 @@ void tien_init(void) {
     }
     #endif
     builtins_init();
+    modules_init();
 
     register_cmd("tien", tien_run_cmd);
     register_cmd("tien_stop", tien_stop_cmd);

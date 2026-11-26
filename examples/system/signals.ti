@@ -1,0 +1,30 @@
+/*
+ * signals.ti
+ * React to firmware signals: count seconds and report Wi-Fi changes.
+ *
+ * A script has one handler and it is called for EVERY signal, so it picks the ones it needs.
+ * Keep it short: SIG_WEB_POLL and SIG_MQTT_PUBLISH make the firmware task wait until the handler returns.
+ */
+
+import system;
+
+int seconds = 0;
+
+/* @brief Called by the firmware with the signal number. */
+void on_signal(int sig) {
+    if (sig == system.SIG_1SEC) {
+        seconds += 1;
+        print("Seconds since subscribe: ", seconds);
+    } else if (sig == system.SIG_WIFI_CONNECTED) {
+        print("Wi-Fi connected");
+    } else if (sig == system.SIG_WIFI_DISCONNECTED) {
+        print("Wi-Fi disconnected");
+    }
+}
+
+system.subscribe(on_signal);
+
+// Keep the script alive: the handler runs while the script waits in delay
+while (true) {
+    delay(1000);
+}

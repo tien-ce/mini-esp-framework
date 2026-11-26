@@ -23,7 +23,8 @@ typedef enum {
     FS_ERR_ALLOC_FAILED,     /**< Heap/PSRAM allocation for a read/list buffer failed */
     FS_ERR_WRITE_INCOMPLETE, /**< Fewer bytes were written to flash than requested */
     FS_ERR_OPERATION_FAILED, /**< The underlying LittleFS call failed */
-    FS_ERR_INVALID_ARG,      /**< A required argument was NULL */
+    FS_ERR_INVALID_ARG,      /**< A required argument was NULL, or the path is not allowed (e.g. removing "/") */
+    FS_ERR_NOT_EMPTY,        /**< Directory still holds files or directories */
 } FsResult_t;
 
 /*---- PUBLIC FUNCTIONS ----*/
@@ -36,12 +37,7 @@ typedef enum {
 const char *file_system_strerror(FsResult_t result);
 
 /**
- * @brief Initializes the file system (LittleFS) and its in-memory dentry cache.
- *
- * @note Also (re)creates the internal dentry cache used to accelerate path
- *       and directory resolution for every other function in this header.
- *       The cache is entirely transparent - it never changes observable
- *       behavior or return values, only how fast repeated lookups are.
+ * @brief Initializes (mounts) the file system (LittleFS).
  *
  * @param formatonfail True to format the file system if mounting fails.
  * @param basepath The base mount point.
@@ -52,8 +48,6 @@ bool file_system_init(bool formatonfail = true, const char *basepath = "/littlef
 
 /**
  * @brief Formats the LittleFS partition.
- * @note Also invalidates and rebuilds the in-memory dentry cache, since every
- *       previously cached path/directory is wiped along with the flash contents.
  * @return true on successful format, false otherwise.
  */
 bool file_system_format();
@@ -126,16 +120,18 @@ FsResult_t remove_file(const char *path);
 FsResult_t rename_file(const char *pathfrom, const char *pathto);
 
 /**
- * @brief Creates a directory.
+ * @brief Creates a directory (not recursive: the parent must already exist).
  * @param path Absolute path of the directory.
- * @return FsResult_t Status code.
+ * @return FsResult_t FS_OK, FS_ERR_ALREADY_EXISTS (path taken), FS_ERR_NOT_FOUND (parent missing),
+ *         FS_ERR_NOT_A_DIRECTORY (parent is a file), or another error code.
  */
 FsResult_t make_directory(const char *path);
 
 /**
- * @brief Removes a directory.
+ * @brief Removes an empty directory (not recursive).
  * @param path Absolute path of the directory.
- * @return FsResult_t Status code.
+ * @return FsResult_t FS_OK, FS_ERR_NOT_FOUND, FS_ERR_NOT_A_DIRECTORY (path is a file),
+ *         FS_ERR_NOT_EMPTY (still has children), FS_ERR_INVALID_ARG (path is "/"), or another error code.
  */
 FsResult_t remove_dir(const char *path);
 

@@ -1,4 +1,4 @@
-#include "built_in.h"
+#include "scripting/builtins/built_in.h"
 #include "TienInterpreter.h"
 #include "core/file_system.h"
 #include "core/core_log.h"
@@ -8,8 +8,8 @@
 /** @brief Built-in file_read function to read entire text file from LittleFS into a string. */
 static value_t *built_in_file_read(ti_handle_t handle, value_t **argv, int argc) {
     if (argc != 1 || argv == NULL || argv[0] == NULL || argv[0]->type != VAL_STRING || argv[0]->string_val == NULL) {
-        ti_log("[ERROR] %s: Expect 1 string argument (file path)\n", BUILTIN_FILE_READ);
-        ti_fatal();
+        ti_raise_error(handle, TI_ERR_INVALID_ARG, "%s: Expect 1 string argument (file path)", BUILTIN_FILE_READ);
+        return NULL;
     }
     char *buffer = NULL;
     size_t read_bytes = 0;
@@ -28,8 +28,8 @@ static value_t *built_in_file_write(ti_handle_t handle, value_t **argv, int argc
     if (argc != 2 || argv == NULL || argv[0] == NULL || argv[1] == NULL ||
         argv[0]->type != VAL_STRING || argv[1]->type != VAL_STRING ||
         argv[0]->string_val == NULL || argv[1]->string_val == NULL) {
-        ti_log("[ERROR] %s: Expect 2 string arguments (file path, content)\n", BUILTIN_FILE_WRITE);
-        ti_fatal();
+        ti_raise_error(handle, TI_ERR_INVALID_ARG, "%s: Expect 2 string arguments (file path, content)", BUILTIN_FILE_WRITE);
+        return NULL;
     }
     const char *path = argv[0]->string_val;
     const char *data = argv[1]->string_val;
@@ -45,8 +45,8 @@ static value_t *built_in_file_write(ti_handle_t handle, value_t **argv, int argc
 /** @brief Built-in file_exists function to check if a file exists on LittleFS. */
 static value_t *built_in_file_exists(ti_handle_t handle, value_t **argv, int argc) {
     if (argc != 1 || argv == NULL || argv[0] == NULL || argv[0]->type != VAL_STRING || argv[0]->string_val == NULL) {
-        ti_log("[ERROR] %s: Expect 1 string argument (file path)\n", BUILTIN_FILE_EXISTS);
-        ti_fatal();
+        ti_raise_error(handle, TI_ERR_INVALID_ARG, "%s: Expect 1 string argument (file path)", BUILTIN_FILE_EXISTS);
+        return NULL;
     }
     bool exists = LittleFS.exists(argv[0]->string_val);
     return val_new_bool(exists);
@@ -55,8 +55,8 @@ static value_t *built_in_file_exists(ti_handle_t handle, value_t **argv, int arg
 /** @brief Built-in file_remove function to delete a file from LittleFS. */
 static value_t *built_in_file_remove(ti_handle_t handle, value_t **argv, int argc) {
     if (argc != 1 || argv == NULL || argv[0] == NULL || argv[0]->type != VAL_STRING || argv[0]->string_val == NULL) {
-        ti_log("[ERROR] %s: Expect 1 string argument (file path)\n", BUILTIN_FILE_REMOVE);
-        ti_fatal();
+        ti_raise_error(handle, TI_ERR_INVALID_ARG, "%s: Expect 1 string argument (file path)", BUILTIN_FILE_REMOVE);
+        return NULL;
     }
     FsResult_t ret = remove_file(argv[0]->string_val);
     if (ret != FS_OK) {
