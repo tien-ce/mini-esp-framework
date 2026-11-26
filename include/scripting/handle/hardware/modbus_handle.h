@@ -13,6 +13,11 @@
  * when the last value pointing to the handle is destroyed (end of script included). There is no other owner.
  * modbus_master builds the RTU frame (address, PDU, CRC) and handles the 3.5 character silence.
  *
+ * request() runs in modbus_task, a task created for each request, not in the script: the script waits with
+ * ti_wait_flag, so its signal handlers and events keep running. One request at a time per handle. The native
+ * returns only after modbus_task has left the handle (also when the script is stopped), so the destructor
+ * never frees a handle that modbus_task is still using.
+ *
  * Script view:
  *   attributes: port, baud, frame (read only)
  *   methods:    open(port, baud, frame)                              -> "OK" or the error text of modbus_master
@@ -38,6 +43,21 @@ typedef struct {
     uint32_t             baud;      /**< Baud rate given to open(). */
     ModbusSerialConfig_t frame;     /**< RTU frame given to open() (RTU_8N1, RTU_8E1, ...). */
     bool                 is_open;   /**< True while this handle holds the port in modbus_master. */
+    bool                 busy;      /**< Set while a request runs, cleared by the native once it read the result. */
+
+    /* Request: written by the native before it starts modbus_task */
+    uint8_t              slave;       /**< Slave address. */
+    uint8_t              function;    /**< Function code (reads 1..4 only). */
+    uint16_t             address;     /**< First register / coil. */
+    uint16_t             quantity;    /**< Number of registers / coils. */
+    uint32_t             timeout_ms;  /**< Answer timeout. */
+    ti_handle_t          runtime;     /**< Script that made the request: woken when it ended. */
+
+    /* Result: written by modbus_task */
+    bool                 done;                              /**< Set when the request ended, waited with ti_wait_flag. */
+    ModbusMasterStatus_t status;                            /**< Result of ModbusMaster_Send. */
+    uint8_t              data[MODBUS_MASTER_MAX_RESPONSE];  /**< Answer: 2 bytes per register, high byte first. */
+    size_t               data_len;                          /**< Bytes in data (0 on error). */
 } modbus_handle_t;
 
 /*---- HANDLE TYPE ----*/

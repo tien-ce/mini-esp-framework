@@ -13,4 +13,5 @@ void modules_init(void) {
     storage_module_init();
     ipc_module_init();
     system_module_init();
+    network_module_init();
 }

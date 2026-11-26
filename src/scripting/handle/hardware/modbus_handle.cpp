@@ -1,12 +1,33 @@
 /**
  * @file modbus_handle.cpp
- * @brief Script handle "modbus": attributes, methods and destructor of modbus_handle_t.
+ * @brief Script handle "modbus": attributes, methods and destructor of modbus_handle_t, and modbus_task, the task
+ *        created for each request.
+ *
+ * Flow of request():
+ *
+ *     script task (native)                          modbus_task (one per request)
+ *     --------------------                          -----------------------------
+ *     fill self->slave, function, ..., runtime
+ *     create modbus_task(self)           ----->     ModbusMaster_Send, write status and data
+ *     ti_wait_flag(&self->done)                     ti_signal_flag(runtime, &done): last access to self
+ *       (signal handlers keep running)
+ *     build {"status", "data"}           <-----     delete itself
+ *
+ * If the script is stopped while waiting, ti_wait_flag returns at once and the native keeps polling done, so it
+ * only returns once modbus_task has left self.
  */
 
 /*---- INCLUDES ----*/
 #include "config.h"
 #ifdef USE_MODBUS_MASTER
 #include "scripting/handle/hardware/modbus_handle.h"
+#include <freertos/task.h>
+
+/*---- CONFIG ----*/
+
+#define MODBUS_TASK_STACK_SIZE   4096    /* Bytes, stack of each modbus_task (the answer buffer is in self) */
+#define MODBUS_TASK_PRIORITY     1
+#define MODBUS_STOP_POLL_MS      10      /* Poll period for done when the script is stopped mid request */
 
 /*---- DEFINES ----*/
 
@@ -24,6 +45,7 @@ static value_t *modbus_open(ti_handle_t handle, value_t **argv, int argc);
 static value_t *modbus_request(ti_handle_t handle, value_t **argv, int argc);
 static value_t *modbus_close(ti_handle_t handle, value_t **argv, int argc);
 static ModbusMasterStatus_t modbus_close_port(modbus_handle_t *self);
+static void modbus_task(void *arg);
 static void modbus_destroy(void *ptr);
 static ti_status_t modbus_get_attr(void *ptr, const char *name, value_t **out);
 static ti_status_t modbus_set_attr(void *ptr, const char *name, const value_t *value);
@@ -68,6 +90,25 @@ static ModbusMasterStatus_t modbus_close_port(modbus_handle_t *self) {
     ModbusMasterStatus_t status = ModbusMaster_Close(self->port);
     self->is_open = false;
     return status;
+}
+
+/*---- STATIC FUNCTIONS: MODBUS TASK ----*/
+
+/**
+ * @brief modbus_task: send the request stored in self, write the result into self, wake the script, then delete
+ *        itself.
+ * @details ti_signal_flag is the last access to self: the native may return as soon as done is set.
+ * @param arg The modbus_handle_t* whose request fields were filled by the native.
+ */
+static void modbus_task(void *arg) {
+    modbus_handle_t *self = (modbus_handle_t *)arg;
+
+    self->data_len = sizeof(self->data);
+    self->status   = ModbusMaster_Send(self->port, self->slave, self->function, self->address, self->quantity,
+                                       self->timeout_ms, self->data, &self->data_len);
+
+    ti_signal_flag(self->runtime, &self->done);
+    vTaskDelete(NULL);
 }
 
 /*---- STATIC FUNCTIONS: METHODS ----*/
@@ -123,11 +164,12 @@ static value_t *modbus_open(ti_handle_t handle, value_t **argv, int argc) {
  * @details Only the read functions 1..4 are accepted: any other function (all the writes included) raises an
  *          error and nothing is sent, because writing to a device can move a machine. Slave and quantity are
  *          checked by the library (status MBM_ERR_REQUEST); here only the values the casts would wrap are raised.
- * @param handle Calling runtime handle, used to raise script mistakes.
+ *          The request runs in modbus_task; the script waits with ti_wait_flag, so its signal handlers keep running.
+ * @param handle Calling runtime handle, used to raise script mistakes (also woken by modbus_task).
  * @param argv Arguments: (self, slave, function, address, quantity, timeout_ms). Owned by the interpreter, only read.
  * @param argc Argument count (unused).
  * @return Dict {"status": "OK" or the error text of modbus_master, "data": bytes, 2 per register, high byte first
- *         (empty on error)}; NULL after raising an error.
+ *         (empty on error)}; null when the script is being stopped; NULL after raising an error.
  */
 static value_t *modbus_request(ti_handle_t handle, value_t **argv, int argc) {
     (void)argc;
@@ -166,22 +208,53 @@ static value_t *modbus_request(ti_handle_t handle, value_t **argv, int argc) {
         return NULL;
     }
 
-    // Step 3: send and wait for the answer (blocks the script up to timeout_ms)
-    uint8_t buf[MODBUS_MASTER_MAX_RESPONSE];
-    size_t len = sizeof(buf);
-    ModbusMasterStatus_t status = ModbusMaster_Send(self->port, (uint8_t)slave, (uint8_t)function, (uint16_t)address,
-                                                    (uint16_t)quantity, (uint32_t)timeout_ms, buf, &len);
+    // Step 3: one request at a time per handle (a signal handler may call request while the script waits)
+    if (__atomic_exchange_n(&self->busy, true, __ATOMIC_ACQ_REL)) {
+        ti_raise_error(handle, TI_ERR_INVALID_VALUE, "modbus.request: a request is already running on this modbus");
+        return NULL;
+    }
 
-    // Step 4: build {"status", "data"}; val_dict_set takes the value even when it fails
-    value_t *bytes  = val_new_bytes(buf, (int)len);
+    // Step 4: copy the request into self and start the task that sends it
+    self->slave      = (uint8_t)slave;
+    self->function   = (uint8_t)function;
+    self->address    = (uint16_t)address;
+    self->quantity   = (uint16_t)quantity;
+    self->timeout_ms = (uint32_t)timeout_ms;
+    self->runtime    = handle;
+    self->done       = false;
+
+    if (xTaskCreate(modbus_task, "modbus_task", MODBUS_TASK_STACK_SIZE, self, MODBUS_TASK_PRIORITY, NULL) != pdPASS) {
+        __atomic_store_n(&self->busy, false, __ATOMIC_RELEASE);
+        ti_raise_error(handle, TI_ERR_NO_MEMORY, "modbus.request: cannot start the request task");
+        return NULL;
+    }
+
+    // Step 5: wait for done. No limit here: ModbusMaster_Send always ends within timeout_ms
+    if (ti_wait_flag(handle, &self->done, TI_PORT_WAIT_FOREVER) != TI_OK) {
+        // Stopped: ti_wait_flag returns at once, so keep waiting here. modbus_task never touches self after
+        // setting done, so self stays valid until this native returns
+        while (!__atomic_load_n(&self->done, __ATOMIC_ACQUIRE)) {
+            vTaskDelay(pdMS_TO_TICKS(MODBUS_STOP_POLL_MS));
+        }
+        __atomic_store_n(&self->busy, false, __ATOMIC_RELEASE);
+        return val_new_null();
+    }
+
+    // Step 6: copy the result out of self, then free the handle for the next request
+    value_t *status = val_new_string(ModbusMaster_StatusToStr(self->status));
+    value_t *bytes  = val_new_bytes(self->data, (int)self->data_len);
+    __atomic_store_n(&self->busy, false, __ATOMIC_RELEASE);
+
+    // Step 7: build {"status", "data"}; val_dict_set takes the value even when it fails
     value_t *result = val_new_dict();
-    if (bytes == NULL || result == NULL) {
+    if (status == NULL || bytes == NULL || result == NULL) {
+        val_free(status);
         val_free(bytes);
         val_free(result);
         ti_raise_error(handle, TI_ERR_NO_MEMORY, "modbus.request: cannot allocate the result");
         return NULL;
     }
-    ti_status_t st = val_dict_set(result->dict_val, "status", val_new_string(ModbusMaster_StatusToStr(status)));
+    ti_status_t st = val_dict_set(result->dict_val, "status", status);
     ti_status_t sd = val_dict_set(result->dict_val, "data", bytes);
     if (st != TI_OK || sd != TI_OK) {
         val_free(result);
@@ -202,6 +275,11 @@ static value_t *modbus_close(ti_handle_t handle, value_t **argv, int argc) {
     (void)argc;
     modbus_handle_t *self = (modbus_handle_t *)argv[0]->handle_val->ptr;
 
+    // A signal handler may call close while the script waits in request: modbus_task still uses the port
+    if (__atomic_load_n(&self->busy, __ATOMIC_ACQUIRE)) {
+        ti_raise_error(handle, TI_ERR_INVALID_VALUE, "modbus.close: a request is running on this modbus");
+        return NULL;
+    }
     if (!self->is_open) {
         ti_raise_error(handle, TI_ERR_INVALID_VALUE, "modbus.close: modbus is not open");
         return NULL;
@@ -213,15 +291,18 @@ static value_t *modbus_close(ti_handle_t handle, value_t **argv, int argc) {
 
 /**
  * @brief Read modbus.port, modbus.baud or modbus.frame (the settings given to the last successful open()).
- * @details Before the first open() all three read 0 (frame 0 is RTU_8N1).
+ * @details Before the first open() all three read 0 (frame 0 is RTU_8N1). No attribute can be read while a
+ *          request runs.
  * @param ptr The modbus_handle_t (never NULL: a closed handle is rejected before the call).
  * @param name Attribute name written in the script.
  * @param out Receives a new int value owned by the caller (only on TI_OK).
- * @return TI_OK, TI_ERR_UNDEFINED for an unknown name, or TI_ERR_NO_MEMORY.
+ * @return TI_OK, TI_ERR_INVALID_VALUE during a request, TI_ERR_UNDEFINED for an unknown name, or TI_ERR_NO_MEMORY.
  */
 static ti_status_t modbus_get_attr(void *ptr, const char *name, value_t **out) {
     const modbus_handle_t *self = (const modbus_handle_t *)ptr;
     int v;
+
+    if (__atomic_load_n(&self->busy, __ATOMIC_ACQUIRE)) return TI_ERR_INVALID_VALUE;
 
     if (strcmp(name, "port") == 0) {
         v = (int)self->port;
@@ -239,14 +320,18 @@ static ti_status_t modbus_get_attr(void *ptr, const char *name, value_t **out) {
 
 /**
  * @brief Write modbus.port / modbus.baud / modbus.frame: refused, the settings only change through open().
- * @param ptr The modbus_handle_t (unused).
+ * @details No attribute can be written while a request runs.
+ * @param ptr The modbus_handle_t.
  * @param name Attribute name written in the script.
  * @param value New value (unused).
- * @return TI_ERR_READ_ONLY for port / baud / frame, TI_ERR_UNDEFINED for any other name.
+ * @return TI_ERR_INVALID_VALUE during a request, TI_ERR_READ_ONLY for port / baud / frame, TI_ERR_UNDEFINED for
+ *         any other name.
  */
 static ti_status_t modbus_set_attr(void *ptr, const char *name, const value_t *value) {
-    (void)ptr;
+    const modbus_handle_t *self = (const modbus_handle_t *)ptr;
     (void)value;
+
+    if (__atomic_load_n(&self->busy, __ATOMIC_ACQUIRE)) return TI_ERR_INVALID_VALUE;
 
     if (strcmp(name, "port") == 0 || strcmp(name, "baud") == 0 || strcmp(name, "frame") == 0) {
         return TI_ERR_READ_ONLY;
