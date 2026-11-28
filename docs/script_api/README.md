@@ -32,7 +32,7 @@ Reading a name tells you what it is:
 
 | Module | Domain | Creates handles | Functions and constants |
 | :--- | :--- | :--- | :--- |
-| [`hardware`](modules/hardware/README.md) | Ports and outputs of the board | [`UART()`](modules/hardware/uart.md), [`MODBUS()`](modules/hardware/modbus.md) | relays, frame constants |
+| [`hardware`](modules/hardware/README.md) | Ports, inputs and outputs of the board | [`UART()`](modules/hardware/uart.md), [`MODBUS()`](modules/hardware/modbus.md), [`PE_SENSOR()`](modules/hardware/photoelectric.md) | relays, frame constants |
 | [`storage`](modules/storage/README.md) | Data that survives a restart | [`NVS()`](modules/storage/nvs.md), [`FILE()`](modules/storage/file.md) | none |
 | [`ipc`](modules/ipc/README.md) | Links between scripts | [`QUEUE()`](modules/ipc/queue.md) | none |
 | [`system`](modules/system/README.md) | Device, time, scripts, firmware signals | none | device info, uptime, run / stop, signals |

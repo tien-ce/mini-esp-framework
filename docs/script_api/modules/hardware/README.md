@@ -1,6 +1,6 @@
 # Module `hardware`
 
-Ports and outputs of the board.
+Ports, inputs and outputs of the board.
 
 [Back to the API index](../../README.md)
 
@@ -14,6 +14,7 @@ import hardware as hw;
 | :--- | :--- | :--- | :--- |
 | `hw.UART()` | [`uart`](uart.md) | Raw bytes on a serial port | none |
 | `hw.MODBUS()` | [`modbus`](modbus.md) | Modbus RTU master (read only) | `USE_MODBUS_MASTER` |
+| `hw.PE_SENSOR()` | [`photoelectric`](photoelectric.md) | Count objects passing a photoelectric sensor | `USE_PHOTO_SENSOR` |
 
 ## Functions
 
@@ -49,4 +50,5 @@ The name reads as data bits, parity (N, E, O), stop bits.
 
 - [`examples/hardware/uart.ti`](../../../../examples/hardware/uart.ti)
 - [`examples/hardware/modbus.ti`](../../../../examples/hardware/modbus.ti)
+- [`examples/hardware/photoelectric.ti`](../../../../examples/hardware/photoelectric.ti)
 - [`examples/hardware/relay.ti`](../../../../examples/hardware/relay.ti)

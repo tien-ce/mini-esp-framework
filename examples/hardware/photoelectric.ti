@@ -1,0 +1,25 @@
+/*
+ * photoelectric.ti
+ * Print how long each object blocked the beam of photoelectric sensor 1.
+ * Needs a firmware built with USE_PHOTO_SENSOR and the pin option PHOTO1_IN set on the sensor's input.
+ */
+
+import hardware as hw;
+
+// Called once per object, when it is over
+void on_object(int duration_ms) {
+    print("Object detected: ", duration_ms, " ms");
+}
+
+handle photo = hw.PE_SENSOR();
+
+// Filter settings are given to the sensor by open(): set them before (setting them while open is an error)
+photo.min_present_ms = 30;
+photo.min_gap_ms     = 200;
+
+print(photo.open(1, on_object));
+
+// Keep the script running so on_object can be called
+while (true) {
+    delay(1000);
+}
