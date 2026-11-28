@@ -9,7 +9,7 @@
 /*---- STATIC FUNCTION PROTOTYPES ----*/
 
 static void uart_on_rx(uint8_t port, const uint8_t *data, size_t len, void *arg);
-static SerialRawStatus_t uart_close_port(uart_handle_t *self);
+static SerialUartStatus_t uart_close_port(uart_handle_t *self);
 static void uart_destroy(void *ptr);
 
 static value_t *uart_open(ti_handle_t handle, value_t **argv, int argc);
@@ -57,17 +57,17 @@ const ti_handle_type_t g_uart_handle_type = {
     uart_set_attr,                                                  /* set_attr */
 };
 
-/*---- STATIC FUNCTIONS: SERIAL_RAW CALLBACK ----*/
+/*---- STATIC FUNCTIONS: SERIAL UART CALLBACK ----*/
 
 /**
- * @brief serial_raw RX callback of every uart: post the received bytes to the handler of the uart that set it.
- * @details Runs in the UART event task with the serial_raw port lock held: never call a SerialRaw_ function here.
+ * @brief Serial UART RX callback of every uart: post the received bytes to the handler of the uart that set it.
+ * @details Runs in the UART event task with the serial UART port lock held: never call a SerialUart_ function here.
  *          The handle is stable: on_receive() and close remove this callback (same lock) before changing or
  *          freeing it.
  * @param port Port that received data (unused: arg already is the handle).
  * @param data Received bytes (valid only during the call).
  * @param len  Number of bytes.
- * @param arg  The uart_handle_t given to SerialRaw_SetRxCallback.
+ * @param arg  The uart_handle_t given to SerialUart_SetRxCallback.
  */
 static void uart_on_rx(uint8_t port, const uint8_t *data, size_t len, void *arg) {
     (void)port;
@@ -84,13 +84,13 @@ static void uart_on_rx(uint8_t port, const uint8_t *data, size_t len, void *arg)
 
 /**
  * @brief Close the port of an open uart and drop its handler; the uart object itself stays.
- * @details Order matters: SerialRaw_Close() waits for a running callback and removes it, so the handler is
+ * @details Order matters: SerialUart_Close() waits for a running callback and removes it, so the handler is
  *          freed only when no callback can read it any more.
  * @param self An open uart (is_open == true).
- * @return Status of SerialRaw_Close().
+ * @return Status of SerialUart_Close().
  */
-static SerialRawStatus_t uart_close_port(uart_handle_t *self) {
-    SerialRawStatus_t status = SerialRaw_Close(self->port);
+static SerialUartStatus_t uart_close_port(uart_handle_t *self) {
+    SerialUartStatus_t status = SerialUart_Close(self->port);
     val_free(self->on_receive);   // val_free(NULL) does nothing
     self->on_receive = NULL;
     self->runtime    = TI_INVALID_HANDLE;
@@ -105,7 +105,7 @@ static SerialRawStatus_t uart_close_port(uart_handle_t *self) {
  * @param handle Calling runtime handle, used to raise script mistakes.
  * @param argv Arguments: (self, port, baud, frame). Owned by the interpreter, only read.
  * @param argc Argument count (unused).
- * @return String "OK" or the error text of serial_raw; NULL after raising an error.
+ * @return String "OK" or the error text of xdrv_03_serial_uart; NULL after raising an error.
  */
 static value_t *uart_open(ti_handle_t handle, value_t **argv, int argc) {
     (void)argc;
@@ -121,9 +121,9 @@ static value_t *uart_open(ti_handle_t handle, value_t **argv, int argc) {
     }
 
     // Step 2: values the uint8_t / uint32_t casts would wrap
-    if (port < 1 || port > SERIAL_BUS_PORT_COUNT) {
+    if (port < 1 || port > SERIAL_UART_PORT_MAX) {
         ti_raise_error(handle, TI_ERR_VALUE_OUT_OF_RANGE, "uart.open: port must be 1..%d, got %d",
-                       SERIAL_BUS_PORT_COUNT, port);
+                       SERIAL_UART_PORT_MAX, port);
         return NULL;
     }
     if (baud <= 0) {
@@ -132,16 +132,16 @@ static value_t *uart_open(ti_handle_t handle, value_t **argv, int argc) {
     }
 
     // Step 3: open, keep the settings only on success
-    SerialRawConfig_t cfg;
+    SerialUartConfig_t cfg;
     cfg.baud  = (uint32_t)baud;
     cfg.frame = (uint32_t)frame;
-    SerialRawStatus_t status = SerialRaw_Open((uint8_t)port, &cfg);
-    if (status == SERIAL_RAW_OK) {
+    SerialUartStatus_t status = SerialUart_Open((uint8_t)port, &cfg);
+    if (status == SERIAL_UART_OK) {
         self->port    = (uint8_t)port;
         self->cfg     = cfg;
         self->is_open = true;
     }
-    return val_new_string(SerialRaw_StatusToStr(status));
+    return val_new_string(SerialUart_StatusToStr(status));
 }
 
 /**
@@ -149,7 +149,7 @@ static value_t *uart_open(ti_handle_t handle, value_t **argv, int argc) {
  * @param handle Calling runtime handle, used to raise script mistakes.
  * @param argv Arguments: (self, data). Owned by the interpreter, only read.
  * @param argc Argument count (unused).
- * @return String "OK" or the error text of serial_raw; NULL after raising an error.
+ * @return String "OK" or the error text of xdrv_03_serial_uart; NULL after raising an error.
  */
 static value_t *uart_write(ti_handle_t handle, value_t **argv, int argc) {
     (void)argc;
@@ -177,7 +177,7 @@ static value_t *uart_write(ti_handle_t handle, value_t **argv, int argc) {
     }
 
     // Step 3: send (empty data comes back as "Invalid argument")
-    return val_new_string(SerialRaw_StatusToStr(SerialRaw_Write(self->port, buf, len)));
+    return val_new_string(SerialUart_StatusToStr(SerialUart_Write(self->port, buf, len)));
 }
 
 /**
@@ -195,7 +195,7 @@ static value_t *uart_is_available(ti_handle_t handle, value_t **argv, int argc) 
         ti_raise_error(handle, TI_ERR_INVALID_VALUE, "uart.is_available: uart is not open");
         return NULL;
     }
-    return val_new_bool(SerialRaw_Available(self->port) > 0);
+    return val_new_bool(SerialUart_Available(self->port) > 0);
 }
 
 /**
@@ -221,7 +221,7 @@ static value_t *uart_read(ti_handle_t handle, value_t **argv, int argc) {
     }
 
     // Step 2: size the result to what is waiting, so the bytes are read straight into it
-    size_t count = SerialRaw_Available(self->port);
+    size_t count = SerialUart_Available(self->port);
     if (count > (size_t)max_len) count = (size_t)max_len;
     if (count > TI_MAX_BYTES_LEN) count = TI_MAX_BYTES_LEN;
 
@@ -234,10 +234,10 @@ static value_t *uart_read(ti_handle_t handle, value_t **argv, int argc) {
 
     // Step 3: take the bytes (only more can arrive after Available(), so all count bytes are there)
     size_t got = 0;
-    SerialRawStatus_t status = SerialRaw_Read(self->port, dst, count, &got);
-    if (status != SERIAL_RAW_OK) {
+    SerialUartStatus_t status = SerialUart_Read(self->port, dst, count, &got);
+    if (status != SERIAL_UART_OK) {
         val_free(bytes);
-        ti_raise_error(handle, TI_ERR_INVALID_VALUE, "uart.read: %s", SerialRaw_StatusToStr(status));
+        ti_raise_error(handle, TI_ERR_INVALID_VALUE, "uart.read: %s", SerialUart_StatusToStr(status));
         return NULL;
     }
     return bytes;
@@ -249,13 +249,13 @@ static value_t *uart_read(ti_handle_t handle, value_t **argv, int argc) {
  * @param handle Calling runtime handle (stored in the uart, also used to raise script mistakes).
  * @param argv Arguments: (self, handler). Owned by the interpreter, only read.
  * @param argc Argument count (unused).
- * @return String "OK" or the error text of serial_raw; NULL after raising an error.
+ * @return String "OK" or the error text of xdrv_03_serial_uart; NULL after raising an error.
  */
 static value_t *uart_on_receive(ti_handle_t handle, value_t **argv, int argc) {
     (void)argc;
     uart_handle_t *self = (uart_handle_t *)argv[0]->handle_val->ptr;
 
-    // Step 1: script mistakes are raised (serial_raw takes a callback only on an open port)
+    // Step 1: script mistakes are raised (xdrv_03_serial_uart takes a callback only on an open port)
     if (!self->is_open) {
         ti_raise_error(handle, TI_ERR_INVALID_VALUE, "uart.on_receive: uart is not open");
         return NULL;
@@ -272,15 +272,15 @@ static value_t *uart_on_receive(ti_handle_t handle, value_t **argv, int argc) {
         return NULL;
     }
 
-    // Step 3: remove the callback first. SerialRaw_SetRxCallback takes the port lock that a running callback holds,
+    // Step 3: remove the callback first. SerialUart_SetRxCallback takes the port lock that a running callback holds,
     // so after it returns no callback reads self and the old handler can be freed
-    SerialRaw_SetRxCallback(self->port, NULL, NULL);
+    SerialUart_SetRxCallback(self->port, NULL, NULL);
     val_free(self->on_receive);
     self->on_receive = func;
     self->runtime    = handle;
 
     // Step 4: register the callback again, with this uart as arg so the callback finds its handler
-    return val_new_string(SerialRaw_StatusToStr(SerialRaw_SetRxCallback(self->port, uart_on_rx, self)));
+    return val_new_string(SerialUart_StatusToStr(SerialUart_SetRxCallback(self->port, uart_on_rx, self)));
 }
 
 /**
@@ -288,7 +288,7 @@ static value_t *uart_on_receive(ti_handle_t handle, value_t **argv, int argc) {
  * @param handle Calling runtime handle, used to raise script mistakes.
  * @param argv Arguments: (self). Owned by the interpreter, only read.
  * @param argc Argument count (unused).
- * @return String "OK" or the error text of serial_raw; NULL after raising an error.
+ * @return String "OK" or the error text of xdrv_03_serial_uart; NULL after raising an error.
  */
 static value_t *uart_close(ti_handle_t handle, value_t **argv, int argc) {
     (void)argc;
@@ -298,7 +298,7 @@ static value_t *uart_close(ti_handle_t handle, value_t **argv, int argc) {
         ti_raise_error(handle, TI_ERR_INVALID_VALUE, "uart.close: uart is not open");
         return NULL;
     }
-    return val_new_string(SerialRaw_StatusToStr(uart_close_port(self)));
+    return val_new_string(SerialUart_StatusToStr(uart_close_port(self)));
 }
 
 /*---- STATIC FUNCTIONS: ATTRIBUTES ----*/

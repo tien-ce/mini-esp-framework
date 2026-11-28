@@ -3,15 +3,15 @@
 
 /**
  * @file modbus_handle.h
- * @brief Script handle "modbus": one Modbus RTU master on a UART port used by a TI script, built on top of modbus_master.
+ * @brief Script handle "modbus": one Modbus RTU master on a port used by a TI script, built on xdrv_04_serial_modbus.
  *
  * Layering:
  *
- *     modbus_master  ->  modbus handle  ->  TI script (hardware.MODBUS())
+ *     xdrv_04_serial_modbus  ->  modbus handle  ->  TI script (hardware.MODBUS())
  *
  * The handle owns the port: the port is opened in Modbus mode by the script through the handle and closed
  * when the last value pointing to the handle is destroyed (end of script included). There is no other owner.
- * modbus_master builds the RTU frame (address, PDU, CRC) and handles the 3.5 character silence.
+ * xdrv_04_serial_modbus builds the RTU frame (address, PDU, CRC) and handles the 3.5 character silence.
  *
  * request() runs in modbus_task, a task created for each request, not in the script: the script waits with
  * ti_wait_flag, so its signal handlers and events keep running. One request at a time per handle. The native
@@ -20,9 +20,9 @@
  *
  * Script view:
  *   attributes: port, baud, frame (read only)
- *   methods:    open(port, baud, frame)                              -> "OK" or the error text of modbus_master
+ *   methods:    open(port, baud, frame)                              -> "OK" or the error text of xdrv_04_serial_modbus
  *               request(slave, function, address, quantity, timeout_ms) -> {"status": text, "data": bytes}
- *               close()                                              -> "OK" or the error text of modbus_master
+ *               close()                                              -> "OK" or the error text of xdrv_04_serial_modbus
  *   Calling request / close on a modbus that is not open raises an error.
  *   request only accepts the read functions 1..4. A write function (5, 6, 15, 16, ...) or any other code raises
  *   an error and is never sent: scripts must not be able to change a machine through Modbus.
@@ -31,7 +31,7 @@
 /*---- INCLUDES ----*/
 #include <Arduino.h>
 #include "TienInterpreter.h"
-#include "hardware/protocol/modbus_master.h"
+#include "hardware/driver/xdrv_04_serial_modbus.h"
 
 /*---- TYPES ----*/
 
@@ -39,10 +39,10 @@
  * @brief Native object wrapped by a "modbus" handle value.
  */
 typedef struct {
-    uint8_t              port;      /**< Port number 1..SERIAL_BUS_PORT_COUNT, 0 before open(). */
+    uint8_t              port;      /**< Port number 1..SERIAL_MODBUS_PORT_MAX, 0 before open(). */
     uint32_t             baud;      /**< Baud rate given to open(). */
     ModbusSerialConfig_t frame;     /**< RTU frame given to open() (RTU_8N1, RTU_8E1, ...). */
-    bool                 is_open;   /**< True while this handle holds the port in modbus_master. */
+    bool                 is_open;   /**< True while this handle holds the port in xdrv_04_serial_modbus. */
     bool                 busy;      /**< Set while a request runs, cleared by the native once it read the result. */
 
     /* Request: written by the native before it starts modbus_task */
@@ -55,8 +55,8 @@ typedef struct {
 
     /* Result: written by modbus_task */
     bool                 done;                              /**< Set when the request ended, waited with ti_wait_flag. */
-    ModbusMasterStatus_t status;                            /**< Result of ModbusMaster_Send. */
-    uint8_t              data[MODBUS_MASTER_MAX_RESPONSE];  /**< Answer: 2 bytes per register, high byte first. */
+    SerialModbusStatus_t status;                            /**< Result of SerialModbus_Send. */
+    uint8_t              data[SERIAL_MODBUS_MAX_RESPONSE];  /**< Answer: 2 bytes per register, high byte first. */
     size_t               data_len;                          /**< Bytes in data (0 on error). */
 } modbus_handle_t;
 

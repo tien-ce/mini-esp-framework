@@ -42,12 +42,22 @@ static const char* AVAILABLE_PIN_OPTIONS[] = {
     "I2C SCL",
     "ADC Input",
     "PHOTO1_IN",
-    "SERIAL1_TX",
-    "SERIAL2_TX",
-    "SERIAL1_RX",
-    "SERIAL2_RX",
-    "SERIAL1_DE",
-    "SERIAL2_DE",
+    /* UART */
+    "SERIAL_UART1_TX",
+    "SERIAL_UART1_RX",
+    "SERIAL_UART1_DE",
+     
+    "SERIAL_UART2_TX",
+    "SERIAL_UART2_RX",
+    "SERIAL_UART2_DE",
+    /* Modbus */
+    "SERIAL_MODBUS1_TX",
+    "SERIAL_MODBUS1_RX",
+    "SERIAL_MODBUS1_DE",
+
+    "SERIAL_MODBUS2_TX",
+    "SERIAL_MODBUS2_RX",
+    "SERIAL_MODBUS2_DE",
 };
 #define AVAILABLE_PIN_OPTIONS_COUNT (sizeof(AVAILABLE_PIN_OPTIONS) / sizeof(AVAILABLE_PIN_OPTIONS[0]))
 
@@ -77,8 +87,8 @@ static const BoardPinDef BOARD_PINS[] = {
     {15, "GPIO15", "Relay3",    false},
     {16, "GPIO16", "Relay4",    false},
     /* Serial 1: Serial1.begin(baud, config, RX 18, TX 17) */
-    {17, "GPIO17", "SERIAL1_TX", false},
-    {18, "GPIO18", "SERIAL1_RX", false},
+    {17, "GPIO17", "None", false},
+    {18, "GPIO18", "None", false},
     /* 8 inputs, connector INPUT pins 1..8 */
     {47, "GPIO47", "None",      false},
     {48, "GPIO48", "None",      false},
@@ -119,11 +129,11 @@ static const BoardPinDef BOARD_PINS[] = {
     {14, "GPIO14", "Relay5",       false},
     {21, "GPIO21", "Relay6",       false},
     /* Serial 1 (default): Serial1.begin(baud, config, RX 18, TX 17) */
-    {17, "GPIO17", "SERIAL1_TX",   false},
-    {18, "GPIO18", "SERIAL1_RX",   false},
+    {17, "GPIO17", "None",   false},
+    {18, "GPIO18", "None",   false},
     /* Serial 2 (default): Serial2.begin(baud, config, RX 2, TX 1) */
-    {1,  "GPIO1",  "SERIAL2_TX",   false},
-    {2,  "GPIO2",  "SERIAL2_RX",   false},
+    {1,  "GPIO1",  "None",   false},
+    {2,  "GPIO2",  "None",   false},
     /* Inputs, connector INPUT pins 1..8; pins 4..6 (GPIO35..37) are taken
      * by the octal PSRAM below and must stay cut from the board */
     {47, "GPIO47", "None",         false},
@@ -172,9 +182,9 @@ static const BoardPinDef BOARD_PINS[] = {
     {15, "GPIO15", "None",        false},
     {16, "GPIO16", "None",        false},
     /* Default RS485 Pins for esp32-rs485-can*/
-    {17, "GPIO17", "SERIAL1_TX",    false},
-    {18, "GPIO18", "SERIAL1_RX",    false},
-    {21, "GPIO21", "SERIAL1_DE",    false},
+    {17, "GPIO17", "None",    false},
+    {18, "GPIO18", "None",    false},
+    {21, "GPIO21", "None",    false},
 };
 #endif
 

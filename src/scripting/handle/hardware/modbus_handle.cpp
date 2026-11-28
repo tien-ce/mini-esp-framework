@@ -8,7 +8,7 @@
  *     script task (native)                          modbus_task (one per request)
  *     --------------------                          -----------------------------
  *     fill self->slave, function, ..., runtime
- *     create modbus_task(self)           ----->     ModbusMaster_Send, write status and data
+ *     create modbus_task(self)           ----->     SerialModbus_Send, write status and data
  *     ti_wait_flag(&self->done)                     ti_signal_flag(runtime, &done): last access to self
  *       (signal handlers keep running)
  *     build {"status", "data"}           <-----     delete itself
@@ -44,7 +44,7 @@
 static value_t *modbus_open(ti_handle_t handle, value_t **argv, int argc);
 static value_t *modbus_request(ti_handle_t handle, value_t **argv, int argc);
 static value_t *modbus_close(ti_handle_t handle, value_t **argv, int argc);
-static ModbusMasterStatus_t modbus_close_port(modbus_handle_t *self);
+static SerialModbusStatus_t modbus_close_port(modbus_handle_t *self);
 static void modbus_task(void *arg);
 static void modbus_destroy(void *ptr);
 static ti_status_t modbus_get_attr(void *ptr, const char *name, value_t **out);
@@ -84,10 +84,10 @@ const ti_handle_type_t g_modbus_handle_type = {
 /**
  * @brief Close the port of an open modbus; the modbus object itself stays.
  * @param self An open modbus (is_open == true).
- * @return Status of ModbusMaster_Close().
+ * @return Status of SerialModbus_Close().
  */
-static ModbusMasterStatus_t modbus_close_port(modbus_handle_t *self) {
-    ModbusMasterStatus_t status = ModbusMaster_Close(self->port);
+static SerialModbusStatus_t modbus_close_port(modbus_handle_t *self) {
+    SerialModbusStatus_t status = SerialModbus_Close(self->port);
     self->is_open = false;
     return status;
 }
@@ -104,7 +104,7 @@ static void modbus_task(void *arg) {
     modbus_handle_t *self = (modbus_handle_t *)arg;
 
     self->data_len = sizeof(self->data);
-    self->status   = ModbusMaster_Send(self->port, self->slave, self->function, self->address, self->quantity,
+    self->status   = SerialModbus_Send(self->port, self->slave, self->function, self->address, self->quantity,
                                        self->timeout_ms, self->data, &self->data_len);
 
     ti_signal_flag(self->runtime, &self->done);
@@ -118,7 +118,7 @@ static void modbus_task(void *arg) {
  * @param handle Calling runtime handle, used to raise script mistakes.
  * @param argv Arguments: (self, port, baud, frame). frame is an RTU_xxx constant. Owned by the interpreter, only read.
  * @param argc Argument count (unused).
- * @return String "OK" or the error text of modbus_master; NULL after raising an error.
+ * @return String "OK" or the error text of xdrv_04_serial_modbus; NULL after raising an error.
  */
 static value_t *modbus_open(ti_handle_t handle, value_t **argv, int argc) {
     (void)argc;
@@ -133,10 +133,10 @@ static value_t *modbus_open(ti_handle_t handle, value_t **argv, int argc) {
         return NULL;
     }
 
-    // Step 2: values the uint8_t / uint32_t / enum casts would wrap (modbus_master does not check the frame)
-    if (port < 1 || port > SERIAL_BUS_PORT_COUNT) {
+    // Step 2: values the uint8_t / uint32_t / enum casts would wrap (the driver does not check the frame)
+    if (port < 1 || port > SERIAL_MODBUS_PORT_MAX) {
         ti_raise_error(handle, TI_ERR_VALUE_OUT_OF_RANGE, "modbus.open: port must be 1..%d, got %d",
-                       SERIAL_BUS_PORT_COUNT, port);
+                       SERIAL_MODBUS_PORT_MAX, port);
         return NULL;
     }
     if (baud <= 0) {
@@ -149,26 +149,29 @@ static value_t *modbus_open(ti_handle_t handle, value_t **argv, int argc) {
     }
 
     // Step 3: open, keep the settings only on success
-    ModbusMasterStatus_t status = ModbusMaster_Open((uint8_t)port, (uint32_t)baud, (ModbusSerialConfig_t)frame);
-    if (status == MBM_OK) {
+    SerialModbusConfig_t cfg;
+    cfg.baud  = (uint32_t)baud;
+    cfg.frame = (ModbusSerialConfig_t)frame;
+    SerialModbusStatus_t status = SerialModbus_Open((uint8_t)port, &cfg);
+    if (status == SERIAL_MODBUS_OK) {
         self->port    = (uint8_t)port;
-        self->baud    = (uint32_t)baud;
-        self->frame   = (ModbusSerialConfig_t)frame;
+        self->baud    = cfg.baud;
+        self->frame   = cfg.frame;
         self->is_open = true;
     }
-    return val_new_string(ModbusMaster_StatusToStr(status));
+    return val_new_string(SerialModbus_StatusToStr(status));
 }
 
 /**
  * @brief Method modbus.request(slave, function, address, quantity, timeout_ms): send one request and wait for the answer.
  * @details Only the read functions 1..4 are accepted: any other function (all the writes included) raises an
  *          error and nothing is sent, because writing to a device can move a machine. Slave and quantity are
- *          checked by the library (status MBM_ERR_REQUEST); here only the values the casts would wrap are raised.
+ *          checked by the library (SERIAL_MODBUS_ERR_REQUEST); here only the values the casts would wrap are raised.
  *          The request runs in modbus_task; the script waits with ti_wait_flag, so its signal handlers keep running.
  * @param handle Calling runtime handle, used to raise script mistakes (also woken by modbus_task).
  * @param argv Arguments: (self, slave, function, address, quantity, timeout_ms). Owned by the interpreter, only read.
  * @param argc Argument count (unused).
- * @return Dict {"status": "OK" or the error text of modbus_master, "data": bytes, 2 per register, high byte first
+ * @return Dict {"status": "OK" or the error text of the driver, "data": bytes, 2 per register, high byte first
  *         (empty on error)}; null when the script is being stopped; NULL after raising an error.
  */
 static value_t *modbus_request(ti_handle_t handle, value_t **argv, int argc) {
@@ -229,7 +232,7 @@ static value_t *modbus_request(ti_handle_t handle, value_t **argv, int argc) {
         return NULL;
     }
 
-    // Step 5: wait for done. No limit here: ModbusMaster_Send always ends within timeout_ms
+    // Step 5: wait for done. No limit here: SerialModbus_Send always ends within timeout_ms
     if (ti_wait_flag(handle, &self->done, TI_PORT_WAIT_FOREVER) != TI_OK) {
         // Stopped: ti_wait_flag returns at once, so keep waiting here. modbus_task never touches self after
         // setting done, so self stays valid until this native returns
@@ -241,7 +244,7 @@ static value_t *modbus_request(ti_handle_t handle, value_t **argv, int argc) {
     }
 
     // Step 6: copy the result out of self, then free the handle for the next request
-    value_t *status = val_new_string(ModbusMaster_StatusToStr(self->status));
+    value_t *status = val_new_string(SerialModbus_StatusToStr(self->status));
     value_t *bytes  = val_new_bytes(self->data, (int)self->data_len);
     __atomic_store_n(&self->busy, false, __ATOMIC_RELEASE);
 
@@ -269,7 +272,7 @@ static value_t *modbus_request(ti_handle_t handle, value_t **argv, int argc) {
  * @param handle Calling runtime handle, used to raise script mistakes.
  * @param argv Arguments: (self). Owned by the interpreter, only read.
  * @param argc Argument count (unused).
- * @return String "OK" or the error text of modbus_master; NULL after raising an error.
+ * @return String "OK" or the error text of xdrv_04_serial_modbus; NULL after raising an error.
  */
 static value_t *modbus_close(ti_handle_t handle, value_t **argv, int argc) {
     (void)argc;
@@ -284,7 +287,7 @@ static value_t *modbus_close(ti_handle_t handle, value_t **argv, int argc) {
         ti_raise_error(handle, TI_ERR_INVALID_VALUE, "modbus.close: modbus is not open");
         return NULL;
     }
-    return val_new_string(ModbusMaster_StatusToStr(modbus_close_port(self)));
+    return val_new_string(SerialModbus_StatusToStr(modbus_close_port(self)));
 }
 
 /*---- STATIC FUNCTIONS: ATTRIBUTES ----*/

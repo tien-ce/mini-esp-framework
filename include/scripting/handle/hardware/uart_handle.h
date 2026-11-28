@@ -3,22 +3,22 @@
 
 /**
  * @file uart_handle.h
- * @brief Script handle "uart": one UART port used by a TI script, built on top of serial_raw.
+ * @brief Script handle "uart": one UART port used by a TI script, built on top of xdrv_03_serial_uart.
  *
  * Layering:
  *
- *     serial_raw  ->  uart handle  ->  TI script (hardware.UART())
+ *     xdrv_03_serial_uart  ->  uart handle  ->  TI script (hardware.UART())
  *
  * The handle owns the port: the port is opened by the script through the handle and closed when the
  * last value pointing to the handle is destroyed (end of script included). There is no other owner.
  *
  * Script view:
  *   attributes: port, baud, frame
- *   methods:    open(port, baud, frame) -> "OK" or the error text of serial_raw
- *               write(data)             -> "OK" or the error text of serial_raw (data: string or bytes)
+ *   methods:    open(port, baud, frame) -> "OK" or the error text of xdrv_03_serial_uart
+ *               write(data)             -> "OK" or the error text of xdrv_03_serial_uart (data: string or bytes)
  *               is_available()          -> bool, true when received bytes are waiting
  *               read(max_len)           -> bytes, up to max_len received bytes (empty when nothing waits)
- *               on_receive(handler)     -> "OK" or the error text of serial_raw; handler(bytes data) runs per
+ *               on_receive(handler)     -> "OK" or the error text of xdrv_03_serial_uart; handler(bytes data) runs per
  *                                          received burst. While set, is_available() / read() see nothing.
  *   Calling write / is_available / read / on_receive on a uart that is not open raises an error.
  */
@@ -26,7 +26,7 @@
 /*---- INCLUDES ----*/
 #include <Arduino.h>
 #include "TienInterpreter.h"
-#include "hardware/protocol/serial_raw.h"
+#include "hardware/driver/xdrv_03_serial_uart.h"
 
 /*---- TYPES ----*/
 
@@ -34,11 +34,11 @@
  * @brief Native object wrapped by a "uart" handle value.
  */
 typedef struct {
-    uint8_t           port;         /**< Port number 1..SERIAL_BUS_PORT_COUNT, 0 before open(). */
-    SerialRawConfig_t cfg;          /**< Baud rate and Arduino frame constant given to open(). */
-    bool              is_open;      /**< True while this handle holds the port in serial_raw. */
-    ti_handle_t       runtime;      /**< Runtime that called on_receive(): the received bytes are posted to it. */
-    value_t          *on_receive;   /**< Handler set by on_receive() (own copy), NULL when none. */
+    uint8_t            port;         /**< Port number 1..SERIAL_UART_PORT_MAX, 0 before open(). */
+    SerialUartConfig_t cfg;          /**< Baud rate and Arduino frame constant given to open(). */
+    bool               is_open;      /**< True while this handle holds the port in xdrv_03_serial_uart. */
+    ti_handle_t        runtime;      /**< Runtime that called on_receive(): the received bytes are posted to it. */
+    value_t           *on_receive;   /**< Handler set by on_receive() (own copy), NULL when none. */
 } uart_handle_t;
 
 /*---- HANDLE TYPE ----*/
