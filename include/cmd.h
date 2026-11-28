@@ -28,8 +28,6 @@
 // ============================================================================
 // 3. MQTT COMMANDS
 // ============================================================================
-#define CMD_MQTT_DATA_TOPIC "DATA_TOPIC"
-#define CMD_MQTT_RPC_TOPIC  "DATA_RPC"
 #define CMD_MQTT_SERVER     "MQTT_SERVER"
 #define CMD_MQTT_PORT       "MQTT_PORT"
 #define CMD_MQTT_USER       "MQTT_USER"

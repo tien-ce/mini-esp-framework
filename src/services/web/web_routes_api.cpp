@@ -194,9 +194,8 @@ static void handleConfigMqtt(AsyncWebServerRequest *request) {
     doc["server"]       = getMqttServer();
     doc["port"]         = getMqttPort();
     doc["user"]         = getMqttUser();
-    doc["topic"]        = getMqttDataTopic();
-    doc["rpc_topic"]    = getMqttRpcTopic();
     doc["interval"]     = getMqttInterval();
+    doc["device_id"]    = getMqttDeviceId();
     doc["has_password"] = getMqttPass().length() > 0;
 
     serializeJson(doc, *response);
@@ -321,9 +320,9 @@ static void handleSaveMqtt(AsyncWebServerRequest *request) {
     // An empty or missing password keeps the stored one (the password is never sent to the browser)
     String pass     = request->hasParam("pass", true)      ? request->getParam("pass", true)->value() : String();
     if (pass.length() == 0) pass = getMqttPass();
-    String topic    = request->hasParam("topic", true)     ? request->getParam("topic", true)->value() : getMqttDataTopic();
-    String rpcTopic = request->hasParam("rpc_topic", true) ? request->getParam("rpc_topic", true)->value() : getMqttRpcTopic();
     uint32_t interval = request->hasParam("interval", true) ? (uint32_t)request->getParam("interval", true)->value().toInt() : getMqttInterval();
+    String deviceId = request->hasParam("device_id", true) ? request->getParam("device_id", true)->value() : getMqttDeviceId();
+    // Old fields "topic" / "rpc_topic" are ignored: topics are fixed (IOT-MONITOR/<MAC>/...)
 
     request->send(200, "text/plain", "OK");
 
@@ -333,14 +332,13 @@ static void handleSaveMqtt(AsyncWebServerRequest *request) {
         String user;
         String pass;
         uint32_t interval;
-        String topic;
-        String rpcTopic;
+        String deviceId;
     };
-    MqttSaveArgs *args = new MqttSaveArgs{server, port, user, pass, interval, topic, rpcTopic};
+    MqttSaveArgs *args = new MqttSaveArgs{server, port, user, pass, interval, deviceId};
 
     xTaskCreate([](void *arg) {
         MqttSaveArgs *a = (MqttSaveArgs*)arg;
-        updateMqttConfig(a->server, a->port, a->user, a->pass, a->interval, a->topic, a->rpcTopic);
+        updateMqttConfig(a->server, a->port, a->user, a->pass, a->interval, a->deviceId);
         delete a;
         postIncomingCommand(CMD_RESTART);
         vTaskDelete(NULL);

@@ -13,12 +13,10 @@ uint16_t getMqttPort();
 String getMqttUser();
 String getMqttPass();
 uint32_t getMqttInterval();
-String getMqttDataTopic();
-String getMqttRpcTopic();
+String getMqttDeviceId();
 
 void updateMqttConfig(const String &server, uint16_t port, const String &user,
-                      const String &pass, uint32_t interval, const String &dataTopic,
-                      const String &rpcTopic);
+                      const String &pass, uint32_t interval, const String &deviceId);
 
 /* -------------------------------------------------------------------------- */
 /*                              PUBLIC DATA API                               */

@@ -25,8 +25,7 @@ static uint16_t mqtt_port;
 static String mqtt_user;
 static String mqtt_pass;
 static uint32_t mqtt_interval;
-static String mqtt_data_topic;
-static String mqtt_rpc_topic;
+static String mqtt_device_id;     /* User-set id, stored for later use (topics still use the MAC) */
 
 static WiFiClient espClient;
 static PubSubClient mqttClient(espClient);
@@ -48,8 +47,7 @@ static JsonDocument mqttDoc;
 
 /* ---------------------------- CENTRAL MONITOR ----------------------------- */
 /*
- * Every device publishes the same topic tree for the central monitor, whatever its app does
- * (the app's own data/RPC topics above are separate and untouched):
+ * Every device publishes the same topic tree for the central monitor, whatever its app does:
  *
  *   IOT-MONITOR/<DEVICE_ID>/STATUS   "online" / "offline"            retained
  *   IOT-MONITOR/<DEVICE_ID>/INFO     {"name","mac","ip","fw",...}    retained
@@ -98,8 +96,7 @@ typedef struct {
 static QueueHandle_t alarmQueue = NULL;     /* Created in mqtt_init() */
 
 /*
- * Data: IOT-MONITOR/<DEVICE_ID>/DATA   same JSON as the app data topic, not retained.
- * Published right after the app data topic, every mqtt_interval.
+ * Data: IOT-MONITOR/<DEVICE_ID>/DATA   telemetry JSON, not retained. Published every mqtt_interval.
  */
 #define MONITOR_TOPIC_DATA       "DATA"
 
@@ -137,8 +134,7 @@ static void saveMqttConfig() {
             core_nvs_save_string("mqtt", "user", mqtt_user);
             core_nvs_save_string("mqtt", "pass", mqtt_pass);
             core_nvs_save_int("mqtt", "interval", mqtt_interval);
-            core_nvs_save_string("mqtt", "data_topic", mqtt_data_topic);
-            core_nvs_save_string("mqtt", "rpc_topic", mqtt_rpc_topic);
+            core_nvs_save_string("mqtt", "device_id", mqtt_device_id);
             /* lock released */
         }
         xSemaphoreGive(mqttMutex);
@@ -155,8 +151,7 @@ static void loadMqttConfig() {
             mqtt_user       = core_nvs_read_string("mqtt", "user", MQTT_USER);
             mqtt_pass       = core_nvs_read_string("mqtt", "pass", MQTT_PASS);
             mqtt_interval   = (uint32_t)core_nvs_read_int("mqtt", "interval", MQTT_INTERVAL);
-            mqtt_data_topic = core_nvs_read_string("mqtt", "data_topic", MQTT_DATA_TOPIC);
-            mqtt_rpc_topic  = core_nvs_read_string("mqtt", "rpc_topic", MQTT_RPC_TOPIC);
+            mqtt_device_id  = core_nvs_read_string("mqtt", "device_id", "");
             /* lock released */
         }
         xSemaphoreGive(mqttMutex);
@@ -172,7 +167,6 @@ static void loadMqttConfig() {
  *      not a normal publish, so it must be handed over here, before the session exists.
  *   2. Once connected: publish STATUS = "online" and INFO (both retained). These are normal
  *      publishes, so they can only go out after connect() succeeded.
- *   3. Subscribe to the app's RPC topic.
  * Runs again after every reconnect, so the monitor always gets "online" back.
  */
 static void connectBroker() {
@@ -219,7 +213,6 @@ static void connectBroker() {
         info["fw"]           = FW_VERSION_STR;
         info["board"]        = BOARD_NAME;
         info["reset_reason"] = esp_info_get_reset_reason(); /* Why the board last restarted, e.g. "PANIC" */
-        info["data_topic"]   = mqtt_data_topic;            /* Where this device's app data goes */
 
         String payload;
         serializeJson(info, payload);
@@ -233,48 +226,8 @@ static void connectBroker() {
             attrDirty = attrDoc.size() > 0;
             xSemaphoreGive(mqttMutex);
         }
-
-        /* Step 3: The app's RPC topic */
-        if (mqtt_rpc_topic.length() > 0) {
-            mqttClient.subscribe(mqtt_rpc_topic.c_str());
-            LOG_INFO("Subscribed to RPC Topic: " + mqtt_rpc_topic);
-        }
     } else {
         LOG_ERROR("MQTT connection failed, rc=" + String(mqttClient.state()));
-    }
-}
-
-/** @brief Command handler: Gets or sets MQTT publish data topic. */
-static void mqtt_cmd_data_topic(const String &arg) {
-    String cleanVal = arg;
-    if (cleanVal.length() > 0) {
-        if (mqttMutex != NULL && xSemaphoreTake(mqttMutex, portMAX_DELAY) == pdTRUE) {
-            mqtt_data_topic = cleanVal;
-            xSemaphoreGive(mqttMutex);
-        } else {
-            mqtt_data_topic = cleanVal;
-        }
-        saveMqttConfig();
-        LOG_INFO("MQTT Data Topic updated to: " + mqtt_data_topic);
-    } else {
-        LOG_INFO("MQTT Data Topic: " + getMqttDataTopic());
-    }
-}
-
-/** @brief Command handler: Gets or sets MQTT RPC topic. */
-static void mqtt_cmd_rpc_topic(const String &arg) {
-    String cleanVal = arg;
-    if (cleanVal.length() > 0) {
-        if (mqttMutex != NULL && xSemaphoreTake(mqttMutex, portMAX_DELAY) == pdTRUE) {
-            mqtt_rpc_topic = cleanVal;
-            xSemaphoreGive(mqttMutex);
-        } else {
-            mqtt_rpc_topic = cleanVal;
-        }
-        saveMqttConfig();
-        LOG_INFO("MQTT RPC Topic updated to: " + mqtt_rpc_topic);
-    } else {
-        LOG_INFO("MQTT RPC Topic: " + getMqttRpcTopic());
     }
 }
 
@@ -379,8 +332,6 @@ static void mqtt_cmd_status(const String &arg) {
     LOG_INFO("Server: " + getMqttServer() + ":" + String(getMqttPort()));
     LOG_INFO("User: " + getMqttUser());
     LOG_INFO("Connected: " + String(mqttClient.connected() ? "YES" : "NO"));
-    LOG_INFO("Data Topic: " + getMqttDataTopic());
-    LOG_INFO("RPC Topic: " + getMqttRpcTopic());
     LOG_INFO("Interval: " + String(getMqttInterval()) + " ms");
     LOG_INFO("------------------------------------");
 }
@@ -395,20 +346,17 @@ uint16_t getMqttPort() { return mqtt_port; }
 String getMqttUser() { return mqtt_user; }
 String getMqttPass() { return mqtt_pass; }
 uint32_t getMqttInterval() { return mqtt_interval; }
-String getMqttDataTopic() { return mqtt_data_topic; }
-String getMqttRpcTopic() { return mqtt_rpc_topic; }
+String getMqttDeviceId() { return mqtt_device_id; }
 
 void updateMqttConfig(const String &server, uint16_t port, const String &user,
-                      const String &pass, uint32_t interval, const String &dataTopic,
-                      const String &rpcTopic) {
+                      const String &pass, uint32_t interval, const String &deviceId) {
     if (mqttMutex != NULL && xSemaphoreTake(mqttMutex, portMAX_DELAY) == pdTRUE) {
         mqtt_server = server;
         mqtt_port = port;
         mqtt_user = user;
         mqtt_pass = pass;
         mqtt_interval = interval;
-        mqtt_data_topic = dataTopic;
-        mqtt_rpc_topic = rpcTopic;
+        mqtt_device_id = deviceId;
         xSemaphoreGive(mqttMutex);
     }
     saveMqttConfig();
@@ -510,16 +458,6 @@ void vMqttTask(void *pvParameters) {
              MONITOR_TOPIC_ROOT, monitor_device_id, MONITOR_TOPIC_ATTR);
 
     // Register MQTT CLI / Web commands
-    register_cmd(CMD_MQTT_DATA_TOPIC, mqtt_cmd_data_topic);
-    register_cmd("MQTT_DATA_TOPIC", mqtt_cmd_data_topic);
-    register_cmd("MQTT_TOPIC", mqtt_cmd_data_topic);
-
-    register_cmd(CMD_MQTT_RPC_TOPIC, mqtt_cmd_rpc_topic);
-    register_cmd("DATA_RPC", mqtt_cmd_rpc_topic);
-    register_cmd("MQTT_RPC_TOPIC", mqtt_cmd_rpc_topic);
-    register_cmd("MQTT_RPC", mqtt_cmd_rpc_topic);
-    register_cmd("RPC_TOPIC", mqtt_cmd_rpc_topic);
-
     register_cmd(CMD_MQTT_SERVER, mqtt_cmd_server);
     register_cmd("MQTT_HOST", mqtt_cmd_server);
     register_cmd("BROKER", mqtt_cmd_server);
@@ -536,8 +474,8 @@ void vMqttTask(void *pvParameters) {
 
     register_cmd(CMD_MQTT_STATUS, mqtt_cmd_status);
 
-    /* loop() runs every MQTT_LOOP_PERIOD_MS to keep the connection alive (keepalive pings,
-     * incoming RPC); telemetry is only published every mqtt_interval */
+    /* loop() runs every MQTT_LOOP_PERIOD_MS to keep the connection alive (keepalive pings);
+     * telemetry is only published every mqtt_interval */
     TickType_t lastPublish = xTaskGetTickCount();
     TickType_t lastAttrCheck = xTaskGetTickCount();
     TickType_t lastConnectTry = 0;
@@ -600,12 +538,7 @@ void vMqttTask(void *pvParameters) {
                     serializeJson(mqttDoc, jsonBuffer);
                     //LOG_INFO_STR("Mqtt publish: %s",jsonBuffer.c_str());
 
-                    if (mqtt_data_topic.length() > 0) {
-                        if (!mqttClient.publish(mqtt_data_topic.c_str(), jsonBuffer.c_str())) {
-                            LOG_ERROR("MQTT publish failed, payload bytes=" + String(jsonBuffer.length()));
-                        }
-                    }
-                    /* Same payload for the central monitor, not retained */
+                    /* Not retained */
                     if (!mqttClient.publish(monitor_data_topic, jsonBuffer.c_str())) {
                         LOG_ERROR("MQTT monitor: DATA publish failed, payload bytes=" + String(jsonBuffer.length()));
                     }
@@ -744,12 +677,10 @@ uint16_t getMqttPort() { return 0; }
 String getMqttUser() { return String(); }
 String getMqttPass() { return String(); }
 uint32_t getMqttInterval() { return 0; }
-String getMqttDataTopic() { return String(); }
-String getMqttRpcTopic() { return String(); }
+String getMqttDeviceId() { return String(); }
 
 void updateMqttConfig(const String &server, uint16_t port, const String &user,
-                      const String &pass, uint32_t interval, const String &dataTopic,
-                      const String &rpcTopic) {}
+                      const String &pass, uint32_t interval, const String &deviceId) {}
 
 bool mqtt_init() { return false; }
 
