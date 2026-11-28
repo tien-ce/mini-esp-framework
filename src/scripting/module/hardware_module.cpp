@@ -1,8 +1,10 @@
 /**
  * @file hardware_module.cpp
  * @brief Script module "hardware": hardware resources for scripts (hardware.UART(), hardware.MODBUS(),
- *        hardware.relay_get(), hardware.relay_set(), hardware.relay_toggle(), hardware.SERIAL_8N1, ...).
- *        MODBUS() exists only when USE_MODBUS_MASTER is set, relay_xxx only when USE_RELAY is set.
+ *        hardware.relay_get(), hardware.relay_set(), hardware.relay_toggle(), hardware.PE_SENSOR(),
+ *        hardware.SERIAL_8N1, ...).
+ *        MODBUS() exists only when USE_MODBUS_MASTER is set, relay_xxx only when USE_RELAY is set,
+ *        PE_SENSOR() only when USE_PHOTO_SENSOR is set.
  *
  * Two families of frame constants:
  *  - SERIAL_xxx: Arduino frame constant (enum SerialConfig in HardwareSerial.h), passed to HardwareSerial::begin() as is.
@@ -24,6 +26,9 @@
 #ifdef USE_RELAY
 #include "hardware/driver/xdrv_02_relay.h"
 #endif
+#ifdef USE_PHOTO_SENSOR
+#include "scripting/handle/hardware/photoelectric_handle.h"
+#endif
 #include "scripting/module/module_manager.h"
 #include "core/core_log.h"
 
@@ -37,6 +42,9 @@ static value_t *hardware_modbus(ti_handle_t handle, value_t **argv, int argc);
 static value_t *hardware_relay_get(ti_handle_t handle, value_t **argv, int argc);
 static value_t *hardware_relay_set(ti_handle_t handle, value_t **argv, int argc);
 static value_t *hardware_relay_toggle(ti_handle_t handle, value_t **argv, int argc);
+#endif
+#ifdef USE_PHOTO_SENSOR
+static value_t *hardware_photoelectric(ti_handle_t handle, value_t **argv, int argc);
 #endif
 
 /*---- PARAMS ----*/
@@ -59,6 +67,9 @@ static const ti_builtin_def_t s_hardware_funcs[] = {
     { "relay_get",    VAL_BOOL,   s_relay_get_params, 1, hardware_relay_get    },
     { "relay_set",    VAL_VOID,   s_relay_set_params, 2, hardware_relay_set    },
     { "relay_toggle", VAL_VOID,   s_relay_get_params, 1, hardware_relay_toggle },
+#endif
+#ifdef USE_PHOTO_SENSOR
+    { "PE_SENSOR",    VAL_HANDLE, NULL,               0, hardware_photoelectric },
 #endif
 };
 
@@ -266,6 +277,39 @@ static value_t *hardware_relay_toggle(ti_handle_t handle, value_t **argv, int ar
     return val_new_void();
 }
 #endif // USE_RELAY
+
+#ifdef USE_PHOTO_SENSOR
+/**
+ * @brief Function hardware.PE_SENSOR(): create a closed photoelectric handle with the default filter settings.
+ *        The sensor is chosen later with photoelectric.open().
+ * @param handle Calling runtime handle, used to raise errors.
+ * @param argv Arguments (none).
+ * @param argc Argument count (unused).
+ * @return New photoelectric handle value (owns the photoelectric_handle_t); NULL after raising an error.
+ */
+static value_t *hardware_photoelectric(ti_handle_t handle, value_t **argv, int argc) {
+    (void)argv;
+    (void)argc;
+
+    // Step 1: the native object, zeroed so sensor reads 0 before open(); the settings start from the defaults
+    photoelectric_handle_t *self = (photoelectric_handle_t *)calloc(1, sizeof(photoelectric_handle_t));
+    if (self == NULL) {
+        ti_raise_error(handle, TI_ERR_NO_MEMORY, "hardware.PE_SENSOR: out of memory");
+        return NULL;
+    }
+    self->min_present_ms = PHOTO_SENSOR_DEFAULT_MIN_PRESENT_MS;
+    self->min_gap_ms     = PHOTO_SENSOR_DEFAULT_MIN_GAP_MS;
+
+    // Step 2: wrap it; on success the value owns self (photoelectric_destroy frees it)
+    value_t *v = val_new_handle(self, &g_photoelectric_handle_type);
+    if (v == NULL) {
+        free(self);   // not taken by val_new_handle on failure
+        ti_raise_error(handle, TI_ERR_NO_MEMORY, "hardware.PE_SENSOR: out of memory");
+        return NULL;
+    }
+    return v;
+}
+#endif // USE_PHOTO_SENSOR
 
 /*---- PUBLIC FUNCTIONS ----*/
 

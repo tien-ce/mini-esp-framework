@@ -41,7 +41,7 @@ static const char* AVAILABLE_PIN_OPTIONS[] = {
     "I2C SDA",
     "I2C SCL",
     "ADC Input",
-    "E3FR2C1_IN",
+    "PHOTO1_IN",
     "SERIAL1_TX",
     "SERIAL2_TX",
     "SERIAL1_RX",
