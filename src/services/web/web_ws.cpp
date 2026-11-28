@@ -3,6 +3,7 @@
 #include "core/core_log.h"
 #include "services/logger/log_task.h"
 #include "config.h"
+#include <ArduinoJson.h>
 
 /* -------------------------------------------------------------------------- */
 /*                              GLOBAL VARIABLES                              */
@@ -54,22 +55,23 @@ static void onWsEvent(AsyncWebSocket *server, AsyncWebSocketClient *client, AwsE
 static void web_ws_log_sink(const String &msg, LogLevel level) {
     if (ws.count() == 0) return;
 
+    // Each frame is {"level":"INFO","msg":"..."}; the page picks the color from the level
+    const char *name;
     switch (level) {
-        case LOG_LEVEL_DEBUG:
-            ws.textAll(String(WEB_COLOR_WHITE) + msg + WEB_COLOR_RESET);
-            break;
-        case LOG_LEVEL_INFO:
-            ws.textAll(String(WEB_COLOR_GREEN) + msg + WEB_COLOR_RESET);
-            break;
-        case LOG_LEVEL_WARNING:
-            ws.textAll(String(WEB_COLOR_YELLOW) + msg + WEB_COLOR_RESET);
-            break;
-        case LOG_LEVEL_ERROR:
-            ws.textAll(String(WEB_COLOR_RED) + msg + WEB_COLOR_RESET);
-            break;
-        default:
-            break;
+        case LOG_LEVEL_DEBUG:   name = "DEBUG";   break;
+        case LOG_LEVEL_INFO:    name = "INFO";    break;
+        case LOG_LEVEL_WARNING: name = "WARNING"; break;
+        case LOG_LEVEL_ERROR:   name = "ERROR";   break;
+        default: return;
     }
+
+    JsonDocument doc;
+    doc["level"] = name;
+    doc["msg"] = msg;
+
+    String frame;
+    serializeJson(doc, frame);
+    ws.textAll(frame);
 }
 
 /* -------------------------------------------------------------------------- */
