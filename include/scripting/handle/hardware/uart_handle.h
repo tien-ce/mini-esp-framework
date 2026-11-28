@@ -37,6 +37,8 @@ typedef struct {
     uint8_t           port;         /**< Port number 1..SERIAL_BUS_PORT_COUNT, 0 before open(). */
     SerialRawConfig_t cfg;          /**< Baud rate and Arduino frame constant given to open(). */
     bool              is_open;      /**< True while this handle holds the port in serial_raw. */
+    ti_handle_t       runtime;      /**< Runtime that called on_receive(): the received bytes are posted to it. */
+    value_t          *on_receive;   /**< Handler set by on_receive() (own copy), NULL when none. */
 } uart_handle_t;
 
 /*---- HANDLE TYPE ----*/

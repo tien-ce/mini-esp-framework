@@ -61,8 +61,9 @@ typedef struct {
  * @param port Port the bytes came from.
  * @param data Received bytes.
  * @param len  Number of bytes in data.
+ * @param arg  The arg given to SerialRaw_SetRxCallback() with this callback.
  */
-typedef void (*SerialRawRxCb_t)(uint8_t port, const uint8_t *data, size_t len);
+typedef void (*SerialRawRxCb_t)(uint8_t port, const uint8_t *data, size_t len, void *arg);
 
 /** Result of the serial_raw functions. SERIAL_RAW_OK is 0, everything else is an error. */
 typedef enum {
@@ -140,9 +141,10 @@ SerialRawStatus_t SerialRaw_Read(uint8_t port, uint8_t *buf, size_t max_len, siz
  *          (SerialRaw_Available() / SerialRaw_Read() see nothing). Closing the port removes the callback.
  * @param[in] port Port number.
  * @param[in] cb   Function to call, or NULL to remove it.
+ * @param[in] arg  Passed as is to every call of cb (e.g. the owner's object). Not used by serial_raw.
  * @return SERIAL_RAW_OK or an error code.
  */
-SerialRawStatus_t SerialRaw_SetRxCallback(uint8_t port, SerialRawRxCb_t cb);
+SerialRawStatus_t SerialRaw_SetRxCallback(uint8_t port, SerialRawRxCb_t cb, void *arg);
 
 /**
  * @brief Send a request and read the answer as one uninterruptible operation.

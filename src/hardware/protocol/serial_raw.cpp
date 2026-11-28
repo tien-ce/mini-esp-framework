@@ -21,6 +21,7 @@ typedef struct {
     const SerialResources_t *res;       /* Resources owned by the bus, valid while opened */
     std::mutex               lock;      /* Serialises open / close / write / read / transact on this port */
     SerialRawRxCb_t          rx_cb;     /* Called with the received bytes, NULL = nobody listening */
+    void                    *rx_arg;    /* Given back to rx_cb on every call */
     uint8_t                  rx_buf[SERIAL_RAW_RX_CHUNK]; /* Bytes handed to rx_cb */
 } RawPort_t;
 
@@ -80,7 +81,7 @@ static void OnRx(uint8_t port) {
         len = rp->res->serial->read(rp->rx_buf, len);
 
         // Step 2: deliver
-        rp->rx_cb(port, rp->rx_buf, len);
+        rp->rx_cb(port, rp->rx_buf, len, rp->rx_arg);
     }
 }
 
@@ -153,6 +154,7 @@ SerialRawStatus_t SerialRaw_Open(uint8_t port, const SerialRawConfig_t *cfg) {
     // Step 8: mark the port open LAST, so a reader never sees a half set-up port
     rp->res = res;
     rp->rx_cb = NULL;
+    rp->rx_arg = NULL;
     rp->opened = true;
     return SERIAL_RAW_OK;
 }
@@ -174,6 +176,7 @@ SerialRawStatus_t SerialRaw_Close(uint8_t port) {
 
     // Step 4: stop the receive callback, then leave the transceiver in receive mode and stop the UART
     rp->rx_cb = NULL;
+    rp->rx_arg = NULL;
     res->serial->onReceive(nullptr);
     if (res->de_pin != GPIO_INVALID) digitalWrite(res->de_pin, LOW);
     res->serial->end();
@@ -242,7 +245,7 @@ SerialRawStatus_t SerialRaw_Read(uint8_t port, uint8_t *buf, size_t max_len, siz
     return SERIAL_RAW_OK;
 }
 
-SerialRawStatus_t SerialRaw_SetRxCallback(uint8_t port, SerialRawRxCb_t cb) {
+SerialRawStatus_t SerialRaw_SetRxCallback(uint8_t port, SerialRawRxCb_t cb, void *arg) {
     // Step 1: validate the port before touching any state
     if (!ValidPort(port)) return SERIAL_RAW_ERR_INVALID_PORT;
 
@@ -252,8 +255,9 @@ SerialRawStatus_t SerialRaw_SetRxCallback(uint8_t port, SerialRawRxCb_t cb) {
     // Step 2: the port must be open (Close clears the callback)
     if (!rp->opened) return SERIAL_RAW_ERR_NOT_OPEN;
 
-    // Step 3: set or remove it
-    rp->rx_cb = cb;
+    // Step 3: set or remove it, with its arg (under the lock: a running callback never sees one without the other)
+    rp->rx_cb  = cb;
+    rp->rx_arg = arg;
     return SERIAL_RAW_OK;
 }
 

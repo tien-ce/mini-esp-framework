@@ -6,22 +6,9 @@
 /*---- INCLUDES ----*/
 #include "scripting/handle/hardware/uart_handle.h"
 
-/*---- TYPES ----*/
-
-/** Script handler of one port, set by uart.on_receive(). Empty: func == NULL. */
-typedef struct {
-    ti_handle_t runtime;   /* Runtime that called on_receive(); the data is posted to it */
-    value_t    *func;      /* Handler function value (own copy, freed when replaced or when the port closes) */
-} UartRxSlot_t;
-
-/*---- STATIC VARIABLES ----*/
-
-/** One slot per port, index = port - 1. Static, so every slot starts empty (NULL). */
-static UartRxSlot_t s_rx_slots[SERIAL_BUS_PORT_COUNT];
-
 /*---- STATIC FUNCTION PROTOTYPES ----*/
 
-static void uart_on_rx(uint8_t port, const uint8_t *data, size_t len);
+static void uart_on_rx(uint8_t port, const uint8_t *data, size_t len, void *arg);
 static SerialRawStatus_t uart_close_port(uart_handle_t *self);
 static void uart_destroy(void *ptr);
 
@@ -73,40 +60,41 @@ const ti_handle_type_t g_uart_handle_type = {
 /*---- STATIC FUNCTIONS: SERIAL_RAW CALLBACK ----*/
 
 /**
- * @brief serial_raw RX callback of every uart: post the received bytes to the handler of the port.
+ * @brief serial_raw RX callback of every uart: post the received bytes to the handler of the uart that set it.
  * @details Runs in the UART event task with the serial_raw port lock held: never call a SerialRaw_ function here.
- * @param port Port that received data.
+ *          The handle is stable: on_receive() and close remove this callback (same lock) before changing or
+ *          freeing it.
+ * @param port Port that received data (unused: arg already is the handle).
  * @param data Received bytes (valid only during the call).
- * @param len Number of bytes.
+ * @param len  Number of bytes.
+ * @param arg  The uart_handle_t given to SerialRaw_SetRxCallback.
  */
-static void uart_on_rx(uint8_t port, const uint8_t *data, size_t len) {
-    // The slot is only changed while this callback is removed (port lock), so it is stable here
-    const UartRxSlot_t *slot = &s_rx_slots[port - 1];
-    if (slot->func == NULL) return;
+static void uart_on_rx(uint8_t port, const uint8_t *data, size_t len, void *arg) {
+    (void)port;
+    const uart_handle_t *self = (const uart_handle_t *)arg;
 
     // Exactly len bytes -> VAL_BYTES (ti_post_event takes it, also on failure; the function value is borrowed)
-    value_t *arg = val_new_bytes(data, (int)len);
-    if (arg == NULL) return;
-    value_t *args[1] = { arg };
-    ti_post_event(slot->runtime, slot->func, args, 1);
+    value_t *bytes = val_new_bytes(data, (int)len);
+    if (bytes == NULL) return;
+    value_t *args[1] = { bytes };
+    ti_post_event(self->runtime, self->on_receive, args, 1);
 }
 
 /*---- STATIC FUNCTIONS: HELPERS ----*/
 
 /**
- * @brief Close the port of an open uart and empty its receive slot; the uart object itself stays.
- * @details Order matters: SerialRaw_Close() waits for a running callback and removes it, so the slot is
- *          emptied only when no callback can read it any more.
+ * @brief Close the port of an open uart and drop its handler; the uart object itself stays.
+ * @details Order matters: SerialRaw_Close() waits for a running callback and removes it, so the handler is
+ *          freed only when no callback can read it any more.
  * @param self An open uart (is_open == true).
  * @return Status of SerialRaw_Close().
  */
 static SerialRawStatus_t uart_close_port(uart_handle_t *self) {
     SerialRawStatus_t status = SerialRaw_Close(self->port);
-    UartRxSlot_t *slot = &s_rx_slots[self->port - 1];
-    val_free(slot->func);   // val_free(NULL) does nothing
-    slot->func = NULL;
-    slot->runtime = TI_INVALID_HANDLE;
-    self->is_open = false;
+    val_free(self->on_receive);   // val_free(NULL) does nothing
+    self->on_receive = NULL;
+    self->runtime    = TI_INVALID_HANDLE;
+    self->is_open    = false;
     return status;
 }
 
@@ -258,7 +246,7 @@ static value_t *uart_read(ti_handle_t handle, value_t **argv, int argc) {
 /**
  * @brief Method uart.on_receive(func handler): call handler(bytes data) for every burst received on the port.
  * @details Setting it again replaces the handler. The calling runtime is stored so the data reaches this script.
- * @param handle Calling runtime handle (stored in the port slot, also used to raise script mistakes).
+ * @param handle Calling runtime handle (stored in the uart, also used to raise script mistakes).
  * @param argv Arguments: (self, handler). Owned by the interpreter, only read.
  * @param argc Argument count (unused).
  * @return String "OK" or the error text of serial_raw; NULL after raising an error.
@@ -267,7 +255,7 @@ static value_t *uart_on_receive(ti_handle_t handle, value_t **argv, int argc) {
     (void)argc;
     uart_handle_t *self = (uart_handle_t *)argv[0]->handle_val->ptr;
 
-    // Step 1: script mistakes are raised (the slot is indexed by the port, known only once open)
+    // Step 1: script mistakes are raised (serial_raw takes a callback only on an open port)
     if (!self->is_open) {
         ti_raise_error(handle, TI_ERR_INVALID_VALUE, "uart.on_receive: uart is not open");
         return NULL;
@@ -285,15 +273,14 @@ static value_t *uart_on_receive(ti_handle_t handle, value_t **argv, int argc) {
     }
 
     // Step 3: remove the callback first. SerialRaw_SetRxCallback takes the port lock that a running callback holds,
-    // so after it returns no callback reads the slot and the old handler can be freed
-    SerialRaw_SetRxCallback(self->port, NULL);
-    UartRxSlot_t *slot = &s_rx_slots[self->port - 1];
-    val_free(slot->func);
-    slot->func = func;
-    slot->runtime = handle;
+    // so after it returns no callback reads self and the old handler can be freed
+    SerialRaw_SetRxCallback(self->port, NULL, NULL);
+    val_free(self->on_receive);
+    self->on_receive = func;
+    self->runtime    = handle;
 
-    // Step 4: register the callback again with the filled slot
-    return val_new_string(SerialRaw_StatusToStr(SerialRaw_SetRxCallback(self->port, uart_on_rx)));
+    // Step 4: register the callback again, with this uart as arg so the callback finds its handler
+    return val_new_string(SerialRaw_StatusToStr(SerialRaw_SetRxCallback(self->port, uart_on_rx, self)));
 }
 
 /**
